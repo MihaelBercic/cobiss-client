@@ -1,6 +1,6 @@
 import cobiss.CobissClient
 import cobiss.Language
-import cobiss.builder.project.Project
+import cobiss.builder.project.ProjectDetails
 
 fun main(args: Array<String>) {
     val username = args.getOrNull(0) ?: throw Exception("Missing username...")
@@ -12,7 +12,9 @@ fun main(args: Array<String>) {
         .build()
 
     val queryResponse = client.fetch(projectsQuery)
-    val projects = queryResponse.parse<List<Project>>()
-    projects.forEach(System.out::println)
+    println(queryResponse)
+    val project = queryResponse.parse<ProjectDetails>()
+    // projects.forEach(System.out::println)
+    println(project.projectInformation)
 
 }

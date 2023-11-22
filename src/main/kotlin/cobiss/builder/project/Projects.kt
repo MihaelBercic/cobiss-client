@@ -15,11 +15,15 @@ class Projects(private val cobissClient: CobissClient) : CobissAPI<ProjectDetail
 
     override fun newQuery() = ProjectsQueryBuilder(endpoint, cobissClient)
 
-    override fun findById(id: String): ProjectDetails {
+    override fun findById(id: String): ProjectDetails? {
         val request = HttpRequest.newBuilder().GET()
         val response = cobissClient.fetch("$endpoint/${URLEncoder.encode(id, "utf-8")}", request)
         val body = response.body()
-        return Json.decodeFromString(body)
+        return try {
+            Json.decodeFromString(body)
+        } catch (e: Exception) {
+            null
+        }
     }
 
 }

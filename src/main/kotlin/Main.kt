@@ -11,13 +11,13 @@ fun main(args: Array<String>) {
         .limit(10)
         .fetch()
 
-    val project = client.projects.findById("7576")
+    val project = client.projects.findById("sdsdsdsd")
 }
 
 
-interface CobissAPI<A, B>{
+interface CobissAPI<A, B> {
     val endpoint: String
-    fun findById(id: String): A
+    fun findById(id: String): A?
     fun newQuery(): QueryBuilder<B>
 }
 

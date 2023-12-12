@@ -9,7 +9,7 @@ import java.net.http.HttpRequest
 /**
  * @author Mihael Berčič on 22. 11. 23.
  */
-class Projects(private val cobissClient: CobissClient) : CobissAPI<ProjectDetails, Project> {
+class ProjectsAPI(override val cobissClient: CobissClient) : CobissAPI<ProjectDetails, ProjectsQueryBuilder> {
 
     override val endpoint: String = "project"
 
@@ -20,7 +20,7 @@ class Projects(private val cobissClient: CobissClient) : CobissAPI<ProjectDetail
         val response = cobissClient.fetch("$endpoint/${URLEncoder.encode(id, "utf-8")}", request)
         val body = response.body()
         return try {
-            Json.decodeFromString(body)
+            cobissClient.json.decodeFromString(body)
         } catch (e: Exception) {
             null
         }

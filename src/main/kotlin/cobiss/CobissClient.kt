@@ -1,6 +1,7 @@
 package cobiss
 
-import cobiss.builder.project.Projects
+import cobiss.builder.project.ProjectsAPI
+import cobiss.builder.researcher.ResearchersAPI
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -14,7 +15,7 @@ import java.net.http.HttpResponse
  */
 class CobissClient(private val username: String, private val password: String, private val system: String, private val language: Language) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    val json = Json { ignoreUnknownKeys = true }
     private val url = "https://cris.cobiss.net/$system/${language.abbreviation}/service"
     private val httpClient = HttpClient.newHttpClient()
     private var token: String = fetchToken()
@@ -39,6 +40,7 @@ class CobissClient(private val username: String, private val password: String, p
         return httpClient.send(finishedRequest, HttpResponse.BodyHandlers.ofString())
     }
 
-    val projects get() = Projects(this)
+    val projects get() = ProjectsAPI(this)
+    val researchers get() = ResearchersAPI(this)
 
 }

@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter
 private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
 
 fun main(args: Array<String>) {
+    println("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
     Database.connect("jdbc:sqlite:cobiss.db", "org.sqlite.JDBC")
     transaction {
         try {
@@ -35,7 +36,7 @@ fun main(args: Array<String>) {
     val username = args.getOrNull(0) ?: throw Exception("Missing username...")
     val password = args.getOrNull(1) ?: throw Exception("Missing password...")
     val delay = args.getOrNull(2)?.toLong() ?: 500
-    val modes = args.drop(3).takeIf { it.isNotEmpty() } ?: throw Exception("No modes provided [prepare, fetch]")
+    val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
 
     if (modes.contains("prepare")) prepareBibliographies(delay)
@@ -68,11 +69,11 @@ private fun prepareBibliographies(delay: Long) {
 private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
     val researcher = transaction { ResearcherEntity.findById(mstid) } ?: throw NoSuchElementException("No researcher with mstid: $mstid")
     val title = researcher.title.takeIf { it.isNotBlank() }?.plus('+') ?: ""
-    val firstName = researcher.firstName.split(" ").joinToString("+")
-    val lastName = researcher.lastName.split(" ").joinToString("+")
+    val firstName = researcher.firstName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
+    val lastName = researcher.lastName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
+    val code = URLEncoder.encode("[$mstid]", Charset.defaultCharset())
 
-    val fullName = URLEncoder.encode("$title$firstName+$lastName+[$mstid]", Charset.defaultCharset())
-    val form = "fullName=$fullName&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
+    val form = "fullName=$title$firstName+$lastName+$code&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
     val request = HttpRequest
         .newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid"))
         .header("Content-Type", "application/x-www-form-urlencoded")

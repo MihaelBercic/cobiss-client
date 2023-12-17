@@ -22,6 +22,8 @@ import java.time.format.DateTimeFormatter
 
 
 private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
+private val dateTimeFormatter = DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")
+private val timezone = ZoneId.of("UTC+1")
 
 fun main(args: Array<String>) {
     println("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
@@ -38,9 +40,41 @@ fun main(args: Array<String>) {
     val delay = args.getOrNull(2)?.toLong() ?: 500
     val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
+    File("bibliographies").mkdir()
 
-    if (modes.contains("prepare")) prepareBibliographies(delay)
-    if (modes.contains("fetch")) fetchBibliographies(delay)
+    getBibliographies(modes.contains("prepare"), modes.contains("fetch"), delay)
+
+    prepareBibliographyForResearcher(36213, BibliographyOutputFormat.Xml)
+    Thread.sleep(delay * 3)
+    fetchBibliographyForResearcher(36213, BibliographyOutputFormat.Xml)
+}
+
+private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
+    val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(30)
+    chunks.forEach { chunk ->
+        if (prepare) {
+            chunk.forEach { id ->
+                try {
+                    prepareBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
+                    Thread.sleep(delay)
+                } catch (e: Exception) {
+                    println("Error happened [prepare] for $id")
+                    e.printStackTrace()
+                }
+            }
+            Thread.sleep(delay * 3)
+        }
+
+        if (fetch) chunk.forEach { id ->
+            try {
+                fetchBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
+                Thread.sleep(delay)
+            } catch (e: Exception) {
+                println("Error happened [fetch] for $id")
+                e.printStackTrace()
+            }
+        }
+    }
 }
 
 private fun fetchBibliographies(delay: Long) {
@@ -58,7 +92,7 @@ private fun prepareBibliographies(delay: Long) {
     val researchers = transaction { ResearcherEntity.all().map { it.mstid } }
     researchers.forEach {
         try {
-            fetchBibliographyForResearcher(it, BibliographyOutputFormat.Xml)
+            prepareBibliographyForResearcher(it, BibliographyOutputFormat.Xml)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -67,6 +101,12 @@ private fun prepareBibliographies(delay: Long) {
 }
 
 private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
+    val bibliographyUrl = transaction { BibliographyUrl.findById(mstid) } ?: throw Exception("No such URL for $mstid.")
+    val file = File("bibliographies/$mstid.${outputFormat.extension}")
+    URI(bibliographyUrl.url).toURL().openStream().use { it.transferTo(file.outputStream()) }
+}
+
+private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
     val researcher = transaction { ResearcherEntity.findById(mstid) } ?: throw NoSuchElementException("No researcher with mstid: $mstid")
     val title = researcher.title.takeIf { it.isNotBlank() }?.plus('+') ?: ""
     val firstName = researcher.firstName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
@@ -79,9 +119,11 @@ private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: Bibliograph
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
         .POST(BodyPublishers.ofString(form)).build()
+
+    val currentTime = LocalDateTime.now(timezone)
     val response = httpClient.send(request, BodyHandlers.discarding());
-    val timeFormat = LocalDateTime.now(ZoneId.of("UTC+1")).format(DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss"))
-    val urlPath = "https://bib.cobiss.net/bibliographies/si/webBiblio/bib301_${timeFormat}_$mstid.${outputFormat.extension}"
+    val timeFormat = currentTime.format(dateTimeFormatter)
+    val urlPath = response.uri().toURL().toString()
     println("${"$mstid".padEnd(10)} @ $timeFormat => ${urlPath.padEnd(50)} ${response.statusCode()}")
 
     transaction {

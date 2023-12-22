@@ -22,6 +22,7 @@ class ProjectsAPI(override val cobissClient: CobissClient) : CobissAPI<ProjectDe
         return try {
             cobissClient.json.decodeFromString(body)
         } catch (e: Exception) {
+            e.printStackTrace()
             null
         }
     }

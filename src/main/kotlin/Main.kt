@@ -8,6 +8,10 @@ import database.tables.ResearchersTable
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.simpleframework.xml.Serializer
+import org.simpleframework.xml.core.Persister
+import xml.BibliographyDivision
+import xml.BibliographyPojo
 import java.io.File
 import java.net.URI
 import java.net.URLEncoder
@@ -44,13 +48,23 @@ fun main(args: Array<String>) {
 
     getBibliographies(modes.contains("prepare"), modes.contains("fetch"), delay)
 
-    prepareBibliographyForResearcher(36213, BibliographyOutputFormat.Xml)
-    Thread.sleep(delay * 3)
-    fetchBibliographyForResearcher(36213, BibliographyOutputFormat.Xml)
+    val serializer: Serializer = Persister()
+    val dataFetch = serializer.read(BibliographyPojo::class.java, File("bibliographies/36213.xml"))
+    dataFetch.divisions.forEach {
+        printDivisions(it)
+    }
+}
+
+private fun printDivisions(division: BibliographyDivision) {
+    division.divisions.forEach { printDivisions(it) }
+    println(division.title)
+    division.entryList?.entries?.forEach { entry ->
+        println("${entry.title} [${entry.evaluation?.points?.toDoubleOrNull()}] => ${entry.authors?.authors?.joinToString { "${it.lastName} [${it.responsibility}]" }}")
+    }
 }
 
 private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
-    val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(30)
+    val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(120)
     chunks.forEach { chunk ->
         if (prepare) {
             chunk.forEach { id ->
@@ -171,6 +185,7 @@ private fun fetchResearchers(client: CobissClient) {
         val type = researcher.type
         val typeDescription = researcher.typeDescription
         val mstid = researcher.mstid.toInt()
+
         transaction {
             val researcherEntityStatement: ResearcherEntity.() -> Unit = {
                 this.firstName = firstName
@@ -181,6 +196,7 @@ private fun fetchResearchers(client: CobissClient) {
                 this.subfield = subfield
                 this.type = type
                 this.mstid = mstid
+                this.sicrisID = researcher.id
             }
             val existingResearcher = ResearcherEntity.findById(mstid)
             existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(researcherEntityStatement)

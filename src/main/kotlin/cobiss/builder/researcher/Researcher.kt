@@ -145,7 +145,7 @@ data class ResearcherDetails(
     val mstid: String = "",
     val previousEmployments: List<EmployData> = emptyList(),
     val programmesAndProjectsResults: List<ProgramResultData> = emptyList(),
-    val programs: List<String> = emptyList(),
+    // val programs: List<String> = emptyList(),
     val projects: List<ProjectData> = emptyList(),
     val researcher: Researcher = Researcher(),
     val rsrttl: String = "",

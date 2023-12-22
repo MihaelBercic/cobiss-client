@@ -13,6 +13,7 @@ object ResearchersTable : IdTable<Int>("researchers") {
     val firstName = varchar("first_name", 150)
     val lastName = varchar("last_name", 150)
     val title = varchar("title", 50)
+    val sicrisID = integer("sicris_id").default(-1)
     val mstid = integer("mstid").uniqueIndex()
     val sex = bool("sex")
     val type = varchar("type", 100) // TODO: maybe change to enum later when I find out which types are possible
@@ -34,5 +35,6 @@ class ResearcherEntity(id: EntityID<Int>) : IntEntity(id) {
     var type by ResearchersTable.type
     var science by ResearchersTable.science
     var subfield by ResearchersTable.subfield
+    var sicrisID by ResearchersTable.sicrisID
 
 }

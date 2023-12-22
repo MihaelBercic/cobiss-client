@@ -18,6 +18,9 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:$exposedVersion")
     implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")
     implementation("org.xerial:sqlite-jdbc:3.43.0.0")
+
+    implementation("org.simpleframework:simple-xml:2.7.1")
+
 }
 
 tasks.test {

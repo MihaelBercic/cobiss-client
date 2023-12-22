@@ -36,7 +36,10 @@ class CobissClient(private val username: String, private val password: String, p
     }
 
     fun fetch(endpoint: String, requestBuilder: HttpRequest.Builder = HttpRequest.newBuilder()): HttpResponse<String> {
-        val finishedRequest = requestBuilder.uri(URI("$url/$endpoint")).header("Content-Type", "application/json").header("Authorization", token).build()
+        val finishedRequest = requestBuilder.uri(URI("$url/$endpoint").apply(System.out::println))
+            .header("Content-Type", "application/json")
+            .header("Authorization", token)
+            .build()
         return httpClient.send(finishedRequest, HttpResponse.BodyHandlers.ofString())
     }
 

@@ -1,5 +1,7 @@
 package cobiss.builder.project
 
+import cobiss.builder.researcher.Researcher
+import cobiss.builder.researcher.ResearcherDetails
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -34,16 +36,15 @@ data class Project(
 @Serializable
 data class ProjectDetails(
     val active: Boolean,
-    val audiovisualSources: List<String> = emptyList(),
-    val biblioRepresent: List<String> = emptyList(),
-    val classificationCerif: List<String> = emptyList(),
-    val classificationFord: List<String> = emptyList(),
-    val classificationFrascati: List<String> = emptyList(),
+    // val audiovisualSources: List<String> = emptyList(),
+    // val biblioRepresent: List<String> = emptyList(),
+    // val classificationCerif: List<String> = emptyList(),
+    // val classificationFord: List<String> = emptyList(),
+    // val classificationFrascati: List<String> = emptyList(),
     val code: String,
     val codeContract: String,
     val codeProgramme: String,
     val codeScience: String,
-    val contact: Contact?,
     val description: String = "",
     val enddate: String,
     val frame: String,
@@ -51,13 +52,13 @@ data class ProjectDetails(
     val hasTender: Boolean,
     val id: Int,
     val name: String,
-    val oldReports: List<String>,
+    // val oldReports: List<String>,
     val organizations: List<Organization>,
     @SerialName("project") val projectInformation: Project,
     val projectId: String,
-    val reportMeta: List<String>,
+    // val reportMeta: List<String>,
     val resaercherFullName: String,
-    val researchers: List<String>,
+    val researchers: List<Researcher>,
     val source: String,
     val startdate: String,
     val stat: String,

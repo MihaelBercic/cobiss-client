@@ -1,12 +1,13 @@
 import cobiss.CobissClient
 import cobiss.Language
 import cobiss.builder.QueryLimit
-import database.tables.BibliographyUrl
-import database.tables.BibliographyUrls
-import database.tables.ResearcherEntity
-import database.tables.ResearchersTable
+import cobiss.builder.project.ProjectDetails
+import cobiss.builder.researcher.ResearcherDetails
+import database.tables.*
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SizedCollection
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
@@ -20,6 +21,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpRequest.BodyPublishers
 import java.net.http.HttpResponse.BodyHandlers
 import java.nio.charset.Charset
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -34,7 +36,7 @@ fun main(args: Array<String>) {
     Database.connect("jdbc:sqlite:cobiss.db", "org.sqlite.JDBC")
     transaction {
         try {
-            SchemaUtils.createMissingTablesAndColumns(BibliographyUrls, ResearchersTable)
+            SchemaUtils.createMissingTablesAndColumns(ProjectsTable, ProjectsResearcherTable, EducationsTable, BibliographyUrls, ResearchersTable)
         } catch (_: java.lang.Exception) {
         }
     }
@@ -46,21 +48,97 @@ fun main(args: Array<String>) {
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
     File("bibliographies").mkdir()
 
+
     getBibliographies(modes.contains("prepare"), modes.contains("fetch"), delay)
 
+    val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
+    storeProjectsForResearcher(client, tosic)
+    storePapersForResearcher(tosic)
+}
+
+private fun storeEducationForResearcher(details: ResearcherDetails) {
+    val id = details.mstid.toInt()
+    val researcher = transaction { ResearcherEntity.findById(id) } ?: throw Error("No researcher found in db.")
+    details.educations.forEach { data ->
+        try {
+            transaction {
+                EducationsTable.insert {
+                    it[EducationsTable.researcher] = researcher.id
+                    it[title] = data.degree
+                    it[code] = data.lvlcode
+                    it[year] = data.year.toInt()
+                    it[university] = data.university
+                }
+            }
+        } catch (_: Exception) {
+
+        }
+    }
+}
+
+private fun storeProjectsForResearcher(client: CobissClient, details: ResearcherDetails) {
+    val projectDetails = details.projects.mapNotNull { client.projects.findById("${it.id}") }
+    projectDetails.forEach { project ->
+        storeProjectInformation(project)
+    }
+}
+
+private fun storeProjectInformation(project: ProjectDetails) {
+    val title = project.name
+    val startDate = LocalDate.parse(project.startdate)
+    val endDate = LocalDate.parse(project.enddate)
+    val fte = project.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
+    try {
+        val existingProject = transaction { ProjectEntity.findById(project.id) }
+        val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
+        val statement: ProjectEntity.() -> Unit = {
+            this.projectId = project.id
+            this.field = project.codeScience
+            this.title = title
+            this.startDate = startDate
+            this.endDate = endDate
+            this.fte = fte
+            this.researchers = SizedCollection(researchers)
+        }
+        transaction { existingProject?.apply(statement) ?: ProjectEntity.new(statement) }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+private fun storePapersForResearcher(details: ResearcherDetails) {
+    val mstid = details.mstid
     val serializer: Serializer = Persister()
-    val dataFetch = serializer.read(BibliographyPojo::class.java, File("bibliographies/36213.xml"))
+    val dataFetch = serializer.read(BibliographyPojo::class.java, File("bibliographies/$mstid.xml"))
     dataFetch.divisions.forEach {
         printDivisions(it)
     }
 }
 
 private fun printDivisions(division: BibliographyDivision) {
-    division.divisions.forEach { printDivisions(it) }
     println(division.title)
     division.entryList?.entries?.forEach { entry ->
-        println("${entry.title} [${entry.evaluation?.points?.toDoubleOrNull()}] => ${entry.authors?.authors?.joinToString { "${it.lastName} [${it.responsibility}]" }}")
+        val title = entry.title
+        val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
+        val authors = entry.authorsGroup?.authors?.mapNotNull { it.codeRes } ?: emptyList()
+        val publicationYear = entry.publicationYear ?: 2023
+        val typology = entry.typology?.code ?: ""
+        val doi = entry.identifier?.doi ?: ""
+        val publishedLocation = entry.bibSet?.firstOrNull()
+        val publishedName = publishedLocation?.title ?: ""
+        val publishedISSN = publishedLocation?.issn ?: ""
+
+        val paperStatement: PaperEntity.() -> Unit = {
+            this.title = title
+            this.points = points
+            this.publicationYear = publicationYear
+            this.typology = typology
+            this.doi = doi
+            this.publishedName = publishedName
+            this.publishedISSN = publishedISSN
+        }
     }
+    division.divisions.forEach { printDivisions(it) }
 }
 
 private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
@@ -218,4 +296,3 @@ interface CobissAPI<A, B> {
     fun findById(id: String): A?
     fun newQuery(): B
 }
-

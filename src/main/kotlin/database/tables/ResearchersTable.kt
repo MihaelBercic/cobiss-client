@@ -37,4 +37,5 @@ class ResearcherEntity(id: EntityID<Int>) : IntEntity(id) {
     var subfield by ResearchersTable.subfield
     var sicrisID by ResearchersTable.sicrisID
 
+    val projects by ProjectEntity via ProjectsResearcherTable
 }

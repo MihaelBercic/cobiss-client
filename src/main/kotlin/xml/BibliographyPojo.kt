@@ -3,7 +3,9 @@ package xml
 import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Element
 import org.simpleframework.xml.ElementList
+import org.simpleframework.xml.Path
 import org.simpleframework.xml.Root
+import org.simpleframework.xml.Text
 
 /**
  * @author Mihael Berčič on 19. 12. 23.
@@ -62,11 +64,14 @@ class BibliographyEntry {
     @field:Attribute(required = false, name = "type")
     var type: String? = null
 
-    @field:Element(required = false, name = "Title")
-    var title: String? = null
+    @field:Element(name = "Title")
+    var title: String = ""
 
     @field:Element(required = false, name = "AuthorGroup")
-    var authors: AuthorGroup? = null
+    var authorsGroup: AuthorGroup? = null
+
+    @field:ElementList(required = false, name = "BiblioSet", inline = true)
+    var bibSet: List<BibliographySet>? = null
 
     @field:Element(required = false, name = "PubYear")
     var publicationYear: Int? = null
@@ -79,6 +84,19 @@ class BibliographyEntry {
 
     @field:Element(required = false, name = "Evaluation")
     var evaluation: Evaluation? = null
+}
+
+@Root(name = "BiblioSet", strict = false)
+class BibliographySet {
+    @field:Attribute(name = "relation", required = false)
+    var relation: String = ""
+
+    @field:Element(name = "Title", required = false)
+    var title: String = ""
+
+
+    @field:Element(name = "ISSN", required = false)
+    var issn: String = ""
 }
 
 data class Typology(
@@ -130,29 +148,29 @@ data class Conor(
     var id: String? = null
 )
 
-@Root(name = "Evaluation")
+@Root(name = "Evaluation", strict = false)
 data class Evaluation(
-    @field:Element(name = "Category")
+    @field:Element(name = "Category", required = false)
     var category: String? = null,
 
-    @field:Element(name = "Performance")
+    @field:Element(name = "Performance", required = false)
     var performance: String? = null,
 
-    @field:Element(name = "HighPerformance")
+    @field:Element(name = "HighPerformance", required = false)
     var highPerformance: String? = null,
 
-    @field:Element(name = "Base")
+    @field:Element(name = "Base", required = false)
     var base: String? = null,
 
-    @field:Element(name = "BasesMbp")
+    @field:Element(name = "BasesMbp", required = false)
     var basesMbp: String? = null,
 
-    @field:Element(name = "Osic")
+    @field:Element(name = "Osic", required = false)
     var osic: String? = null,
 
-    @field:Element(name = "Points")
+    @field:Element(name = "Points", required = false)
     var points: String? = null,
 
-    @field:Element(name = "AuthorsNo")
+    @field:Element(name = "AuthorsNo", required = false)
     var authorsNo: String? = null
 )

@@ -126,8 +126,8 @@ data class EmployData(
 data class ResearcherDetails(
     val accessRights: ResearcherAccessRights = ResearcherAccessRights(),
     val allow: String = "",
-    val audiovisualSources: List<String> = emptyList(),
-    val biblioRepresent: List<String> = emptyList(),
+    // val audiovisualSources: List<String> = emptyList(),
+    // val biblioRepresent: List<String> = emptyList(),
     val classificationCerif: List<ClassificationCerif> = emptyList(),
     val classificationFrascati: List<ClassificationFrascati> = emptyList(),
     val contact: ContactData = ContactData(),
@@ -138,7 +138,7 @@ data class ResearcherDetails(
     val fullName: String = "",
     val hasTender: Boolean = false,
     val id: Int = 0,
-    val internacionalprojects: List<String> = emptyList(),
+    // val internacionalprojects: List<String> = emptyList(),
     val isLeader: Boolean = false,
     val langSkills: List<LangSkillData> = emptyList(),
     val lastName: String = "",
@@ -155,7 +155,7 @@ data class ResearcherDetails(
     val statdate: String = "",
     val title: String = "",
     val type: String = "",
-    val yngResearchers: List<String> = emptyList()
+    // val yngResearchers: List<String> = emptyList()
 )
 
 @Serializable

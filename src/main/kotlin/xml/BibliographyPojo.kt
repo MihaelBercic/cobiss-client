@@ -3,7 +3,6 @@ package xml
 import org.simpleframework.xml.Attribute
 import org.simpleframework.xml.Element
 import org.simpleframework.xml.ElementList
-import org.simpleframework.xml.Path
 import org.simpleframework.xml.Root
 import org.simpleframework.xml.Text
 
@@ -19,7 +18,7 @@ class BibliographyPojo {
     @field:Attribute(name = "code", required = false)
     var code: String? = null
 
-    @field:Element(name = "Name")
+    @field:Element(name = "Name", required = false)
     var name: String? = null
 
     @field:ElementList(required = false, name = "BiblioDiv")
@@ -67,6 +66,9 @@ class BibliographyEntry {
     @field:Element(name = "Title")
     var title: String = ""
 
+    @field:Element(name = "TitleShort")
+    var titleShort: String = ""
+
     @field:Element(required = false, name = "AuthorGroup")
     var authorsGroup: AuthorGroup? = null
 
@@ -76,14 +78,18 @@ class BibliographyEntry {
     @field:Element(required = false, name = "PubYear")
     var publicationYear: Int? = null
 
-    @field:Element(required = false, name = "Identifier")
-    var identifier: Identifier? = null
+    @field:ElementList(required = false, name = "Identifier", inline = true)
+    var identifier: List<Identifier>? = null
 
-    @field:Element(required = true, name = "Typology")
+    @field:Element(required = false, name = "Typology")
     var typology: Typology? = null
 
     @field:Element(required = false, name = "Evaluation")
     var evaluation: Evaluation? = null
+
+    @field:ElementList(required = false, name = "ISSN", inline = true)
+    var issn: List<String>? = null
+
 }
 
 @Root(name = "BiblioSet", strict = false)
@@ -94,19 +100,29 @@ class BibliographySet {
     @field:Element(name = "Title", required = false)
     var title: String = ""
 
+    @field:Element(name = "TitleShort", required = false)
+    var titleShort: String = ""
+
 
     @field:Element(name = "ISSN", required = false)
     var issn: String = ""
 }
 
+@Root(name = "Typology", strict = false)
 data class Typology(
     @field:Attribute(name = "code")
     var code: String? = null
 )
 
+@Root(name = "Identifier", strict = false)
 data class Identifier(
-    @field:Element(name = "DOI")
-    var doi: String? = null
+    @field:ElementList(required = false, inline = true, entry = "DOI")
+    var dois: List<DOI>? = null
+)
+
+data class DOI(
+    @field:Text(required = false)
+    var value: String? = null
 )
 
 @Root(name = "AuthorGroup", strict = false)
@@ -117,13 +133,13 @@ data class AuthorGroup(
 
 @Root(name = "Author", strict = false)
 data class Author(
-    @field:Attribute(name = "responsibility")
+    @field:Attribute(name = "responsibility", required = false)
     var responsibility: String? = null,
 
-    @field:Element(name = "FirstName")
+    @field:Element(name = "FirstName", required = false)
     var firstName: String? = null,
 
-    @field:Element(name = "LastName")
+    @field:Element(name = "LastName", required = false)
     var lastName: String? = null,
 
     @field:Element(name = "Dates", required = false)
@@ -131,9 +147,6 @@ data class Author(
 
     @field:Element(name = "CodeRes", required = false)
     var codeRes: String? = null,
-
-    @field:Element(name = "Contrib", required = false)
-    var contrib: String? = null,
 
     @field:Element(name = "CONOR", required = false)
     var conor: Conor? = null

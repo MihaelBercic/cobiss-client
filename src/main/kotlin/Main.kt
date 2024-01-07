@@ -139,7 +139,7 @@ private fun storeDivision(division: BibliographyDivision) {
         val title = entry.titleShort
         val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
         val authors = transaction { entry.authorsGroup?.authors?.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
-        val publicationYear = entry.publicationYear ?: 2023
+        val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
         val typology = entry.typology?.code ?: ""
         val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
         val publishedLocation = entry.bibSet?.firstOrNull()

@@ -15,10 +15,10 @@ object PapersTable : IntIdTable("papers") {
     // val authors =
     val title = text("title")
     val publicationYear = integer("publication_year")
-    val typology = varchar("typology", 51)
-    val doi = varchar("doi", 52)
+    val typology = varchar("typology", 81)
+    val doi = varchar("doi", 82)
     val publishedName = text("publication_name")
-    val publishedISSN = varchar("publication_issn", 53)
+    val publishedISSN = varchar("publication_issn", 83)
     val points = double("points")
 }
 

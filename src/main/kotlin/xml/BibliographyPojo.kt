@@ -1,10 +1,6 @@
 package xml
 
-import org.simpleframework.xml.Attribute
-import org.simpleframework.xml.Element
-import org.simpleframework.xml.ElementList
-import org.simpleframework.xml.Root
-import org.simpleframework.xml.Text
+import org.simpleframework.xml.*
 
 /**
  * @author Mihael Berčič on 19. 12. 23.
@@ -76,7 +72,7 @@ class BibliographyEntry {
     var bibSet: List<BibliographySet>? = null
 
     @field:Element(required = false, name = "PubYear")
-    var publicationYear: Int? = null
+    var publicationYear: String? = null
 
     @field:ElementList(required = false, name = "Identifier", inline = true)
     var identifier: List<Identifier>? = null

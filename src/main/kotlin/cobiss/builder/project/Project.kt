@@ -36,11 +36,6 @@ data class Project(
 @Serializable
 data class ProjectDetails(
     val active: Boolean,
-    // val audiovisualSources: List<String> = emptyList(),
-    // val biblioRepresent: List<String> = emptyList(),
-    // val classificationCerif: List<String> = emptyList(),
-    // val classificationFord: List<String> = emptyList(),
-    // val classificationFrascati: List<String> = emptyList(),
     val code: String,
     val codeContract: String,
     val codeProgramme: String,
@@ -64,7 +59,12 @@ data class ProjectDetails(
     val stat: String,
     val statadm: String,
     val statdate: String,
-    val type: String
+    val type: String,
+    // val audiovisualSources: List<String> = emptyList(),
+    // val biblioRepresent: List<String> = emptyList(),
+    // val classificationCerif: List<String> = emptyList(),
+    // val classificationFord: List<String> = emptyList(),
+    // val classificationFrascati: List<String> = emptyList(),
 )
 
 @Serializable

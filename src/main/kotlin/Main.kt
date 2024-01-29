@@ -22,25 +22,28 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 
 private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
 private val dateTimeFormatter = DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")
 private val timezone = ZoneId.of("UTC+1")
+private val insertLock = ReentrantLock()
 
 fun main(args: Array<String>) {
     println("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
     Database.connect("jdbc:sqlite:cobiss.db", "org.sqlite.JDBC")
-    transaction {
+    val tables = listOf(
+        ForeignResearchersTable, ForeignPapersResearcherTable,
+        PapersResearcherTable, PapersTable, ProjectsTable,
+        ProjectsResearcherTable, EducationsTable, BibliographyUrls, ResearchersTable
+    )
+    tables.forEach {
         try {
-            SchemaUtils.createMissingTablesAndColumns(
-                PapersResearcherTable, PapersTable,
-                ProjectsTable, ProjectsResearcherTable,
-                EducationsTable,
-                BibliographyUrls,
-                ResearchersTable
-            )
-        } catch (_: java.lang.Exception) {
+            transaction { SchemaUtils.createMissingTablesAndColumns(it) }
+        } catch (e: java.lang.Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -63,17 +66,29 @@ fun main(args: Array<String>) {
 
     val allIds = transaction { ResearcherEntity.all().map { it.sicrisID to it.mstid }.filter { it.first > 0 } }
 
-    allIds.forEach { (sicrisID, mstid) ->
+    /*
+    allIds.forEachIndexed { index, (sicrisID, mstid) ->
         val researcher = client.researchers.findById("$sicrisID")
         if (researcher != null) {
             storeProjectsForResearcher(client, researcher)
-            println("Stored Projects for $mstid")
-            storePapersForResearcher(mstid)
-            println("Stored Papers for $mstid")
+            println("Stored Projects for $mstid \t ${index + 1} / ${allIds.size}")
         } else {
             println("No researcher details found for $sicrisID")
         }
     }
+    */
+    allIds.parallelStream().forEach { (sicrisID, mstid) ->
+        try {
+            val start = System.currentTimeMillis()
+            println("Storing papers for $mstid \t\t@${System.currentTimeMillis()}")
+            storePapersForResearcher(mstid)
+            println("Stored Papers for $mstid \t\t Duration: ${System.currentTimeMillis() - start}ms")
+        } catch (e: Exception) {
+            println("Failed to store papers for MSTID: $mstid, SICRIS: $sicrisID @$mstid.xml")
+            e.printStackTrace()
+        }
+    }
+
 }
 
 private fun storeEducationForResearcher(details: ResearcherDetails) {
@@ -136,42 +151,74 @@ private fun storePapersForResearcher(mstid: Int) {
 
 private fun storeDivision(division: BibliographyDivision) {
     division.entryList?.entries?.forEach { entry ->
-        val title = entry.titleShort
-        val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
-        val authors = transaction { entry.authorsGroup?.authors?.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
-        val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
-        val typology = entry.typology?.code ?: ""
-        val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
-        val publishedLocation = entry.bibSet?.firstOrNull()
-        val publishedName = publishedLocation?.titleShort ?: ""
-        val publishedISSN = entry.issn?.firstOrNull() ?: ""
-        // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
+        insertLock.withLock {
+            val title = entry.titleShort
+            val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
+            val authorNames = entry.authorsGroup?.authors ?: emptyList()
+            val slovenianAuthors = transaction { authorNames.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
+            val foreignAuthors = authorNames.filter { author -> slovenianAuthors.none { "${it.firstName}${it.lastName}" == "${author.firstName}${author.lastName}" } }
+            val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
+            val typology = entry.typology?.code ?: ""
+            val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
+            val publishedLocation = entry.bibSet?.firstOrNull()
+            val publishedName = publishedLocation?.titleShort ?: ""
+            val publishedISSN = entry.issn?.firstOrNull() ?: ""
+            // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
 
-        val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
-        val paperStatement: PaperEntity.() -> Unit = {
-            this.title = title
-            this.points = points
-            this.publicationYear = publicationYear
-            this.typology = typology
-            this.doi = doi
-            this.publishedName = publishedName
-            this.publishedISSN = publishedISSN
-        }
-        val orderedAuthors = authors.mapIndexed { index, s -> index to s }.toMap()
-        val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
-        orderedAuthors.forEach { (index, author) ->
-            transaction {
-                try {
-                    val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
-                    if (!relationExists) {
-                        PapersResearcherTable.insert {
-                            it[PapersResearcherTable.paper] = paper.id
-                            it[PapersResearcherTable.researcher] = author.id
-                            it[PapersResearcherTable.position] = index
+            val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
+            val paperStatement: PaperEntity.() -> Unit = {
+                this.title = title
+                this.points = points
+                this.publicationYear = publicationYear
+                this.typology = typology
+                this.doi = doi
+                this.publishedName = publishedName
+                this.publishedISSN = publishedISSN
+            }
+            val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
+            val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
+            val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
+            orderedAuthors.forEach { (index, author) ->
+                transaction {
+                    try {
+                        val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
+                        if (!relationExists) {
+                            PapersResearcherTable.insert {
+                                it[PapersResearcherTable.paper] = paper.id
+                                it[PapersResearcherTable.researcher] = author.id
+                                it[PapersResearcherTable.position] = index
+                            }
                         }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                }
+            }
+            orderedForeignAuthors.forEach { (index, author) ->
+                val existingEntity = transaction {
+                    ForeignResearcherEntity.find {
+                        (ForeignResearchersTable.firstName eq (author.firstName ?: "")) and (ForeignResearchersTable.lastName eq (author.lastName ?: ""))
+                    }.firstOrNull()
+                }
+                val authorStatement: ForeignResearcherEntity.() -> Unit = {
+                    firstName = author.firstName ?: "Unknown"
+                    lastName = author.lastName ?: "Unknown"
+                }
+                val authorEntity = transaction { existingEntity?.apply(authorStatement) ?: ForeignResearcherEntity.new(authorStatement) }
+
+                transaction {
+                    try {
+                        val relationExists = !ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()
+                        if (!relationExists) {
+                            ForeignPapersResearcherTable.insert {
+                                it[ForeignPapersResearcherTable.paper] = paper.id
+                                it[ForeignPapersResearcherTable.researcher] = authorEntity.id
+                                it[ForeignPapersResearcherTable.position] = index
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
         }
@@ -244,10 +291,7 @@ private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: Bibliogra
     val code = URLEncoder.encode("[$mstid]", Charset.defaultCharset())
 
     val form = "fullName=$title$firstName+$lastName+$code&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
-    val request = HttpRequest
-        .newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid"))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
+    val request = HttpRequest.newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid")).header("Content-Type", "application/x-www-form-urlencoded").header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
         .POST(BodyPublishers.ofString(form)).build()
 
     val currentTime = LocalDateTime.now(timezone)
@@ -264,8 +308,7 @@ private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: Bibliogra
             this.downloaded = false
         }
         existingBibliography?.apply(statement) ?: BibliographyUrl.new(statement)
-    }
-    /*
+    }/*
     val decoder = XMLDecoder(localTmpXMLFile.inputStream()).use {
          println(it.readObject())
      }

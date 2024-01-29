@@ -40,3 +40,10 @@ object PapersResearcherTable : Table("papers_researchers") {
     val position = integer("list_position")
     override val primaryKey: PrimaryKey = PrimaryKey(researcher, paper)
 }
+
+object ForeignPapersResearcherTable : Table("foreign_papers_researchers") {
+    val researcher = reference("researcher", ForeignResearchersTable)
+    val paper = reference("paper", PapersTable)
+    val position = integer("list_position")
+    override val primaryKey: PrimaryKey = PrimaryKey(researcher, paper)
+}

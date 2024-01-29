@@ -14,7 +14,7 @@ object ResearchersTable : IdTable<Int>("researchers") {
     val lastName = varchar("last_name", 150)
     val title = varchar("title", 50)
     val sicrisID = integer("sicris_id").default(-1)
-    val mstid = integer("mstid").uniqueIndex()
+    val mstid = integer("mstid")
     val sex = bool("sex")
     val type = varchar("type", 100) // TODO: maybe change to enum later when I find out which types are possible
     val science = short("science")

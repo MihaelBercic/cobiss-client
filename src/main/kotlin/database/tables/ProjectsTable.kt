@@ -12,12 +12,27 @@ import org.jetbrains.exposed.sql.javatime.date
  * @author Mihael Berčič on 3. 01. 24.
  */
 object ProjectsTable : IdTable<Int>("projects_table") {
-    val projectId = integer("project_id").uniqueIndex()
+    val projectId = integer("project_id")
     val startDate = date("start")
     val endDate = date("end")
     val title = varchar("title", 255)
     val field = varchar("field", 10)
     val fte = double("FTE")
+    val active = bool("active")
+    val code = varchar("code", 255)
+    val codeContract = varchar("codeContract", 255)
+    val codeProgramme = varchar("codeProgramme", 255)
+    val codeScience = varchar("codeScience", 255)
+    val description = varchar("description", 10000)
+    val frame = varchar("frame", 255)
+    val fteHoursDescription = varchar("fteHoursDescription", 255)
+    val hasTender = bool("hasTender")
+    val name = varchar("name", 255)
+    val researcherFullName = varchar("researcherFullName", 255)
+    val stat = varchar("stat", 255)
+    val statadm = varchar("statadm", 255)
+    val statdate = varchar("statdate", 255)
+    val type = varchar("type", 255)
     override val id: Column<EntityID<Int>> = projectId.entityId()
 }
 
@@ -25,6 +40,12 @@ object ProjectsResearcherTable : Table("projects_researchers") {
     val project = reference("project", ProjectsTable)
     val researcher = reference("researcher", ResearchersTable)
     override val primaryKey: PrimaryKey = PrimaryKey(project, researcher)
+}
+
+object ProjectOrganizationsTable : Table("project_organizations") {
+    val project = reference("project", ProjectsTable)
+    val organization = reference("organization", OrganizationTable)
+    override val primaryKey: PrimaryKey = PrimaryKey(project, organization)
 }
 
 class ProjectEntity(id: EntityID<Int>) : IntEntity(id) {
@@ -36,5 +57,22 @@ class ProjectEntity(id: EntityID<Int>) : IntEntity(id) {
     var title by ProjectsTable.title
     var field by ProjectsTable.field
     var fte by ProjectsTable.fte
+    var active by ProjectsTable.active
+    var code by ProjectsTable.code
+    var codeContract by ProjectsTable.codeContract
+    var codeProgramme by ProjectsTable.codeProgramme
+    var codeScience by ProjectsTable.codeScience
+    var description by ProjectsTable.description
+    var frame by ProjectsTable.frame
+    var fteHoursDescription by ProjectsTable.fteHoursDescription
+    var hasTender by ProjectsTable.hasTender
+    var name by ProjectsTable.name
+    var researcherFullName by ProjectsTable.researcherFullName
+    var stat by ProjectsTable.stat
+    var statadm by ProjectsTable.statadm
+    var statdate by ProjectsTable.statdate
+    var type by ProjectsTable.type
+
+    var organizations by OrganizationEntity via ProjectOrganizationsTable
     var researchers by ResearcherEntity via ProjectsResearcherTable
 }

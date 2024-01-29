@@ -1,6 +1,6 @@
 package cobiss.builder.project
 
-import CobissAPI
+import cobiss.CobissAPI
 import cobiss.CobissClient
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder

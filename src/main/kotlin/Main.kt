@@ -1,94 +1,60 @@
 import cobiss.CobissClient
 import cobiss.Language
-import cobiss.builder.QueryLimit
+import cobiss.builder.project.Organization
 import cobiss.builder.project.ProjectDetails
 import cobiss.builder.researcher.ResearcherDetails
 import database.tables.*
-import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SizedCollection
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.simpleframework.xml.Serializer
-import org.simpleframework.xml.core.Persister
-import xml.BibliographyDivision
-import xml.BibliographyPojo
+import xml.BibliographyParser
 import java.io.File
-import java.net.URI
-import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpRequest.BodyPublishers
-import java.net.http.HttpResponse.BodyHandlers
-import java.nio.charset.Charset
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 
+const val DELAY = 500L
 
-private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
-private val dateTimeFormatter = DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")
-private val timezone = ZoneId.of("UTC+1")
-private val insertLock = ReentrantLock()
 
 fun main(args: Array<String>) {
     println("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
     Database.connect("jdbc:sqlite:cobiss.db", "org.sqlite.JDBC")
-    val tables = listOf(
-        ForeignResearchersTable, ForeignPapersResearcherTable,
-        PapersResearcherTable, PapersTable, ProjectsTable,
-        ProjectsResearcherTable, EducationsTable, BibliographyUrls, ResearchersTable
-    )
-    tables.forEach {
-        try {
-            transaction { SchemaUtils.createMissingTablesAndColumns(it) }
-        } catch (e: java.lang.Exception) {
-            e.printStackTrace()
+    try {
+        transaction {
+            SchemaUtils.createMissingTablesAndColumns(
+                ForeignResearchersTable, ForeignPapersResearcherTable, PapersResearcherTable, PapersTable, ProjectsTable, ProjectsResearcherTable, EducationsTable, BibliographyUrls, ResearchersTable, OrganizationTable, ProjectOrganizationsTable
+            )
         }
+    } catch (e: java.lang.Exception) {
+        e.printStackTrace()
     }
 
     val username = args.getOrNull(0) ?: throw Exception("Missing username...")
     val password = args.getOrNull(1) ?: throw Exception("Missing password...")
-    val delay = args.getOrNull(2)?.toLong() ?: 500
-    val modes = args.drop(3)
+    val modes = args.drop(2)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
     File("bibliographies").mkdir()
 
-    // TODO: Testing
-    // val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
-    // storeProjectsForResearcher(client, tosic)
-    // storePapersForResearcher(tosic.mstid.toInt())
-    // storePapersForResearcher(29488)
-    // return
-
-    getBibliographies(modes.contains("prepare"), modes.contains("fetch"), delay)
-    // fetchResearchers(client)
-
-    val allIds = transaction { ResearcherEntity.all().map { it.sicrisID to it.mstid }.filter { it.first > 0 } }
-
     /*
-    allIds.forEachIndexed { index, (sicrisID, mstid) ->
-        val researcher = client.researchers.findById("$sicrisID")
-        if (researcher != null) {
-            storeProjectsForResearcher(client, researcher)
-            println("Stored Projects for $mstid \t ${index + 1} / ${allIds.size}")
-        } else {
-            println("No researcher details found for $sicrisID")
-        }
-    }
-    */
-    allIds.parallelStream().forEach { (sicrisID, mstid) ->
-        try {
-            val start = System.currentTimeMillis()
-            println("Storing papers for $mstid \t\t@${System.currentTimeMillis()}")
-            storePapersForResearcher(mstid)
-            println("Stored Papers for $mstid \t\t Duration: ${System.currentTimeMillis() - start}ms")
-        } catch (e: Exception) {
-            println("Failed to store papers for MSTID: $mstid, SICRIS: $sicrisID @$mstid.xml")
-            e.printStackTrace()
-        }
-    }
+        val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
+        storeProjectsForResearcher(client, tosic)
+        storeEducationForResearcher(tosic)
+        BibliographyParser().parseBibliographies(listOf(tosic.mstid.toInt()))
+        return
+     */
 
+    val bibliographyParser = BibliographyParser()
+    val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.mstid) } }
+    researchers.forEach {
+        val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
+        println("Storing projects for researcher SICRIS: ${it.sicrisId} \t MSTID: ${it.mstid}")
+        storeProjectsForResearcher(client, details)
+        Thread.sleep(DELAY)
+        println("Storing educations for researcher SICRIS: ${it.sicrisId} \t MSTID: ${it.mstid}")
+        storeEducationForResearcher(details)
+        Thread.sleep(DELAY)
+    }
+    bibliographyParser.parseBibliographies(researchers.map(ResearcherID::mstid))
 }
 
 private fun storeEducationForResearcher(details: ResearcherDetails) {
@@ -97,7 +63,7 @@ private fun storeEducationForResearcher(details: ResearcherDetails) {
     details.educations.forEach { data ->
         try {
             transaction {
-                EducationsTable.insert {
+                EducationsTable.insertIgnore {
                     it[EducationsTable.researcher] = researcher.id
                     it[title] = data.degree
                     it[code] = data.lvlcode
@@ -105,14 +71,18 @@ private fun storeEducationForResearcher(details: ResearcherDetails) {
                     it[university] = data.university
                 }
             }
-        } catch (_: Exception) {
-
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }
 
 private fun storeProjectsForResearcher(client: CobissClient, details: ResearcherDetails) {
-    val projectDetails = details.projects.mapNotNull { client.projects.findById("${it.id}") }
+    val projectDetails = details.projects.mapNotNull {
+        val details = client.projects.findById("${it.id}")
+        Thread.sleep(DELAY)
+        return@mapNotNull details
+    }
     projectDetails.forEach { project ->
         storeProjectInformation(project)
     }
@@ -128,11 +98,28 @@ private fun storeProjectInformation(project: ProjectDetails) {
         val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
         val statement: ProjectEntity.() -> Unit = {
             this.projectId = project.id
-            this.field = project.codeScience
-            this.title = title
             this.startDate = startDate
             this.endDate = endDate
+            this.title = title
+            this.field = project.codeScience
             this.fte = fte
+            this.active = project.active
+            this.code = project.code
+            this.codeContract = project.codeContract
+            this.codeProgramme = project.codeProgramme
+            this.codeScience = project.codeScience
+            this.description = project.description
+            this.frame = project.frame
+            this.fteHoursDescription = project.fteHoursDescription
+            this.hasTender = project.hasTender
+            this.name = project.name
+            this.researcherFullName = project.resaercherFullName
+            this.stat = project.stat
+            this.statadm = project.statadm
+            this.statdate = project.statdate
+            this.type = project.type
+
+            this.organizations = SizedCollection(project.organizations.mapNotNull { findOrCreateOrganization(it) })
             this.researchers = SizedCollection(researchers)
         }
         transaction { existingProject?.apply(statement) ?: ProjectEntity.new(statement) }
@@ -141,240 +128,32 @@ private fun storeProjectInformation(project: ProjectDetails) {
     }
 }
 
-private fun storePapersForResearcher(mstid: Int) {
-    val serializer: Serializer = Persister()
-    val dataFetch = serializer.read(BibliographyPojo::class.java, File("bibliographies/$mstid.xml"))
-    dataFetch.divisions.forEach {
-        storeDivision(it)
+private fun findOrCreateOrganization(organization: Organization): OrganizationEntity? {
+    if (organization.id == null) return null
+    val existing = transaction { OrganizationEntity.findById(organization.id) }
+    val statement: OrganizationEntity.() -> Unit = {
+        this.frame = organization.frame
+        this.organizationId = organization.id
+        this.stat = organization.stat
+        this.statadm = organization.statadm
+        this.statdate = organization.statdate
+        this.type = organization.type
+        this.counter = organization.counter
+        this.field = organization.field
+        this.science = organization.science
+        this.subfield = organization.subfield
+        this.city = organization.city
+        this.mstid = organization.mstid
+        this.name = organization.name
+        this.regnum = organization.regnum
+        this.remark = organization.remark
+        this.rolecode = organization.rolecode
+        this.sigla = organization.sigla
+        this.ssm = organization.ssm
+        this.statfrm = organization.statfrm
+        this.taxnum = organization.taxnum
     }
+    return transaction { existing?.apply(statement) ?: OrganizationEntity.new(statement) }
 }
 
-private fun storeDivision(division: BibliographyDivision) {
-    division.entryList?.entries?.forEach { entry ->
-        insertLock.withLock {
-            val title = entry.titleShort
-            val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
-            val authorNames = entry.authorsGroup?.authors ?: emptyList()
-            val slovenianAuthors = transaction { authorNames.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
-            val foreignAuthors = authorNames.filter { author -> slovenianAuthors.none { "${it.firstName}${it.lastName}" == "${author.firstName}${author.lastName}" } }
-            val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
-            val typology = entry.typology?.code ?: ""
-            val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
-            val publishedLocation = entry.bibSet?.firstOrNull()
-            val publishedName = publishedLocation?.titleShort ?: ""
-            val publishedISSN = entry.issn?.firstOrNull() ?: ""
-            // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
-
-            val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
-            val paperStatement: PaperEntity.() -> Unit = {
-                this.title = title
-                this.points = points
-                this.publicationYear = publicationYear
-                this.typology = typology
-                this.doi = doi
-                this.publishedName = publishedName
-                this.publishedISSN = publishedISSN
-            }
-            val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
-            val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
-            val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
-            orderedAuthors.forEach { (index, author) ->
-                transaction {
-                    try {
-                        val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
-                        if (!relationExists) {
-                            PapersResearcherTable.insert {
-                                it[PapersResearcherTable.paper] = paper.id
-                                it[PapersResearcherTable.researcher] = author.id
-                                it[PapersResearcherTable.position] = index
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-            orderedForeignAuthors.forEach { (index, author) ->
-                val existingEntity = transaction {
-                    ForeignResearcherEntity.find {
-                        (ForeignResearchersTable.firstName eq (author.firstName ?: "")) and (ForeignResearchersTable.lastName eq (author.lastName ?: ""))
-                    }.firstOrNull()
-                }
-                val authorStatement: ForeignResearcherEntity.() -> Unit = {
-                    firstName = author.firstName ?: "Unknown"
-                    lastName = author.lastName ?: "Unknown"
-                }
-                val authorEntity = transaction { existingEntity?.apply(authorStatement) ?: ForeignResearcherEntity.new(authorStatement) }
-
-                transaction {
-                    try {
-                        val relationExists = !ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()
-                        if (!relationExists) {
-                            ForeignPapersResearcherTable.insert {
-                                it[ForeignPapersResearcherTable.paper] = paper.id
-                                it[ForeignPapersResearcherTable.researcher] = authorEntity.id
-                                it[ForeignPapersResearcherTable.position] = index
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-        }
-    }
-    division.divisions.forEach { storeDivision(it) }
-}
-
-private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
-    val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(120)
-    chunks.forEach { chunk ->
-        if (prepare) {
-            chunk.forEach { id ->
-                try {
-                    prepareBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
-                    Thread.sleep(delay)
-                } catch (e: Exception) {
-                    println("Error happened [prepare] for $id")
-                    e.printStackTrace()
-                }
-            }
-            Thread.sleep(delay * 3)
-        }
-
-        if (fetch) chunk.forEach { id ->
-            try {
-                fetchBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
-                Thread.sleep(delay)
-            } catch (e: Exception) {
-                println("Error happened [fetch] for $id")
-                e.printStackTrace()
-            }
-        }
-    }
-}
-
-private fun fetchBibliographies(delay: Long) {
-    val urls = transaction { BibliographyUrl.all().toList() }
-    val bibliographiesDirectory = File("bibliographies").mkdir()
-    urls.forEach { bibliographyUrl ->
-        val researcherId = transaction { bibliographyUrl.researcher.value }
-        val file = File("bibliographies/$researcherId.xml")
-        URI(bibliographyUrl.url).toURL().openStream().use { it.transferTo(file.outputStream()) }
-        Thread.sleep(delay)
-    }
-}
-
-private fun prepareBibliographies(delay: Long) {
-    val researchers = transaction { ResearcherEntity.all().map { it.mstid } }
-    researchers.forEach {
-        try {
-            prepareBibliographyForResearcher(it, BibliographyOutputFormat.Xml)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        Thread.sleep(delay)
-    }
-}
-
-private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
-    val bibliographyUrl = transaction { BibliographyUrl.findById(mstid) } ?: throw Exception("No such URL for $mstid.")
-    val file = File("bibliographies/$mstid.${outputFormat.extension}")
-    URI(bibliographyUrl.url).toURL().openStream().use { it.transferTo(file.outputStream()) }
-}
-
-private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
-    val researcher = transaction { ResearcherEntity.findById(mstid) } ?: throw NoSuchElementException("No researcher with mstid: $mstid")
-    val title = researcher.title.takeIf { it.isNotBlank() }?.plus('+') ?: ""
-    val firstName = researcher.firstName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
-    val lastName = researcher.lastName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
-    val code = URLEncoder.encode("[$mstid]", Charset.defaultCharset())
-
-    val form = "fullName=$title$firstName+$lastName+$code&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
-    val request = HttpRequest.newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid")).header("Content-Type", "application/x-www-form-urlencoded").header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
-        .POST(BodyPublishers.ofString(form)).build()
-
-    val currentTime = LocalDateTime.now(timezone)
-    val response = httpClient.send(request, BodyHandlers.discarding());
-    val timeFormat = currentTime.format(dateTimeFormatter)
-    val urlPath = response.uri().toURL().toString()
-    println("${"$mstid".padEnd(10)} @ $timeFormat => ${urlPath.padEnd(50)} ${response.statusCode()}")
-
-    transaction {
-        val existingBibliography = BibliographyUrl.findById(researcher.id.value)
-        val statement: BibliographyUrl.() -> Unit = {
-            this.researcher = researcher.id
-            this.url = urlPath
-            this.downloaded = false
-        }
-        existingBibliography?.apply(statement) ?: BibliographyUrl.new(statement)
-    }/*
-    val decoder = XMLDecoder(localTmpXMLFile.inputStream()).use {
-         println(it.readObject())
-     }
-     */
-
-}
-
-/**
- * 1. Store all researchers in the database
- * 2.
- * 3.
- * 4. https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/{mstid}
- *      - send FORM to ^ url
- *      - take current time (YYYYMMDD_HHMMSS_{mstid}
- *      - get xml from https://bib.cobiss.net/bibliographics/si/webBiblio/bib301_{YYYYMMDD}_{HHMMSS}_{mstid}.(xml / html)
- *
- */
-
-
-enum class BibliographyOutputFormat(val abbreviation: Char, val extension: String) {
-    Html('H', "html"), Xml('X', "xml")
-}
-
-private fun fetchResearchers(client: CobissClient) {
-    val researchers = client.researchers.newQuery().limit(QueryLimit.All).fetch()
-    researchers.forEach { researcher ->
-        val firstName = researcher.firstName
-        val lastName = researcher.lastName
-        val title = researcher.title
-        val science = researcher.science
-        val sex = researcher.sex
-        val subfield = researcher.subfield
-        val type = researcher.type
-        val typeDescription = researcher.typeDescription
-        val mstid = researcher.mstid.toInt()
-
-        transaction {
-            val researcherEntityStatement: ResearcherEntity.() -> Unit = {
-                this.firstName = firstName
-                this.lastName = lastName
-                this.title = title
-                this.science = science.toShortOrNull() ?: -1
-                this.sex = sex == "M"
-                this.subfield = subfield
-                this.type = type
-                this.mstid = mstid
-                this.sicrisID = researcher.id
-            }
-            val existingResearcher = ResearcherEntity.findById(mstid)
-            existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(researcherEntityStatement)
-        }
-        println("Finished adding ${researcher.mstid} to researchers.")
-    }
-}
-
-
-interface CobissAPI<A, B> {
-    val cobissClient: CobissClient
-    val endpoint: String
-
-    fun fetchId(id: String): String {
-        val request = HttpRequest.newBuilder().GET()
-        val response = cobissClient.fetch("$endpoint/${URLEncoder.encode(id, "utf-8")}", request)
-        return response.body()
-    }
-
-    fun findById(id: String): A?
-    fun newQuery(): B
-}
+data class ResearcherID(val sicrisId: Int, val mstid: Int)

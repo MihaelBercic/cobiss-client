@@ -1,6 +1,6 @@
 package cobiss.builder.researcher
 
-import CobissAPI
+import cobiss.CobissAPI
 import cobiss.CobissClient
 
 /**

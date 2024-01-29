@@ -19,6 +19,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")
     implementation("org.jetbrains.exposed:exposed-java-time:$exposedVersion")
     implementation("org.xerial:sqlite-jdbc:3.43.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0-RC2")
 
     implementation("org.simpleframework:simple-xml:2.7.1")
 

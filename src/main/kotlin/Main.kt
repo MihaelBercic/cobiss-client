@@ -4,10 +4,8 @@ import cobiss.builder.project.Organization
 import cobiss.builder.project.ProjectDetails
 import cobiss.builder.researcher.ResearcherDetails
 import database.tables.*
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.SizedCollection
-import org.jetbrains.exposed.sql.insertIgnore
+import logging.Logger
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import xml.BibliographyParser
 import java.io.File
@@ -17,12 +15,25 @@ const val DELAY = 500L
 
 
 fun main(args: Array<String>) {
-    println("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
+    Logger.info("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
+    Logger.info("If no modes are present, researchers are parsed. Mode prepare = setup BIB export. Mode fetch = download BIB export.")
     Database.connect("jdbc:sqlite:cobiss.db", "org.sqlite.JDBC")
     try {
         transaction {
             SchemaUtils.createMissingTablesAndColumns(
-                ForeignResearchersTable, ForeignPapersResearcherTable, PapersResearcherTable, PapersTable, ProjectsTable, ProjectsResearcherTable, EducationsTable, BibliographyUrls, ResearchersTable, OrganizationTable, ProjectOrganizationsTable
+                ForeignResearchersTable,
+                ForeignPapersResearcherTable,
+                PapersResearcherTable,
+                PapersTable,
+                ProjectsTable,
+                ProjectsResearcherTable,
+                EducationsTable,
+                BibliographyUrls,
+                ResearchersTable,
+                OrganizationTable,
+                ProjectOrganizationsTable,
+                ResearchersOrganisationTable,
+                ProjectLeadersTable
             )
         }
     } catch (e: java.lang.Exception) {
@@ -31,10 +42,27 @@ fun main(args: Array<String>) {
 
     val username = args.getOrNull(0) ?: throw Exception("Missing username...")
     val password = args.getOrNull(1) ?: throw Exception("Missing password...")
-    val modes = args.drop(2)
+    val delay = args.getOrNull(2)?.toLongOrNull() ?: throw Exception("Missing delay...")
+    val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
     File("bibliographies").mkdir()
 
+
+    val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.mstid) } }
+//        .filter { it.sicrisId == 41529 } // SANDI
+    val bibliographyParser = BibliographyParser(modes, delay)
+    bibliographyParser.parseBibliographies(researchers.map(ResearcherID::mstid))
+
+    if (modes.isEmpty()) {
+        researchers.forEach {
+            val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
+            storeProjectsForResearcher(client, details)
+            storeEducationForResearcher(details)
+            storeOrganisationsForResearcher(details)
+            Thread.sleep(DELAY)
+        }
+    }
+    Logger.info("Done.");
     /*
         val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
         storeProjectsForResearcher(client, tosic)
@@ -42,23 +70,26 @@ fun main(args: Array<String>) {
         BibliographyParser().parseBibliographies(listOf(tosic.mstid.toInt()))
         return
      */
+}
 
-    val bibliographyParser = BibliographyParser()
-    val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.mstid) } }
-    researchers.forEach {
-        val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
-        println("Storing projects for researcher SICRIS: ${it.sicrisId} \t MSTID: ${it.mstid}")
-        storeProjectsForResearcher(client, details)
-        Thread.sleep(DELAY)
-        println("Storing educations for researcher SICRIS: ${it.sicrisId} \t MSTID: ${it.mstid}")
-        storeEducationForResearcher(details)
-        Thread.sleep(DELAY)
+private fun storeOrganisationsForResearcher(details: ResearcherDetails) {
+    val id = details.mstid.toInt()
+    val researcher = transaction { ResearcherEntity.findById(id) } ?: throw Error("No researcher found in db.")
+    val organisations = mutableListOf<OrganizationEntity>()
+    Logger.info("\tStoring employments for researcher SICRIS: ${details.id} \t MSTID: $id")
+    details.employs.forEach { employ ->
+        val organisation = transaction { OrganizationEntity.findById(employ.orgid) }
+        if (organisation != null) {
+            Logger.info("${details.fullName} works at ${employ.orgName} for ${employ.rsrload}%");
+            organisations.add(organisation)
+        }
     }
-    bibliographyParser.parseBibliographies(researchers.map(ResearcherID::mstid))
+    transaction { researcher.organisations = SizedCollection(organisations) }
 }
 
 private fun storeEducationForResearcher(details: ResearcherDetails) {
     val id = details.mstid.toInt()
+    Logger.info("\tStoring educations for researcher SICRIS: ${details.id} \t MSTID: $id")
     val researcher = transaction { ResearcherEntity.findById(id) } ?: throw Error("No researcher found in db.")
     details.educations.forEach { data ->
         try {
@@ -78,6 +109,7 @@ private fun storeEducationForResearcher(details: ResearcherDetails) {
 }
 
 private fun storeProjectsForResearcher(client: CobissClient, details: ResearcherDetails) {
+    Logger.info("\tStoring projects for researcher SICRIS: ${details.id} \t MSTID: ${details.mstid}")
     val projectDetails = details.projects.mapNotNull {
         val details = client.projects.findById("${it.id}")
         Thread.sleep(DELAY)
@@ -93,6 +125,11 @@ private fun storeProjectInformation(project: ProjectDetails) {
     val startDate = LocalDate.parse(project.startdate)
     val endDate = LocalDate.parse(project.enddate)
     val fte = project.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
+    val leader = transaction {
+        ResearcherEntity.find {
+            concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq project.resaercherFullName
+        }.firstOrNull()
+    }
     try {
         val existingProject = transaction { ProjectEntity.findById(project.id) }
         val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
@@ -122,7 +159,13 @@ private fun storeProjectInformation(project: ProjectDetails) {
             this.organizations = SizedCollection(project.organizations.mapNotNull { findOrCreateOrganization(it) })
             this.researchers = SizedCollection(researchers)
         }
-        transaction { existingProject?.apply(statement) ?: ProjectEntity.new(statement) }
+        val projectEntity = transaction { existingProject?.apply(statement) ?: ProjectEntity.new(statement) }
+        if (leader != null) {
+            val leadingProjects = leader.leadingProjects ?: mutableListOf<ProjectEntity>()
+            transaction {
+                leader.leadingProjects = SizedCollection(leadingProjects.plus(projectEntity))
+            }
+        }
     } catch (e: Exception) {
         e.printStackTrace()
     }

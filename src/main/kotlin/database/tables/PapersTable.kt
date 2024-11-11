@@ -20,6 +20,8 @@ object PapersTable : IntIdTable("papers") {
     val publishedName = text("publication_name")
     val publishedISSN = varchar("publication_issn", 83)
     val points = double("points")
+    val keywords = text("keywords").nullable()
+    val url = varchar("url", 255).nullable()
 }
 
 class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
@@ -32,6 +34,8 @@ class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
     var publishedName by PapersTable.publishedName
     var publishedISSN by PapersTable.publishedISSN
     var points by PapersTable.points
+    var keywords by PapersTable.keywords
+    var url by PapersTable.url
 }
 
 object PapersResearcherTable : Table("papers_researchers") {

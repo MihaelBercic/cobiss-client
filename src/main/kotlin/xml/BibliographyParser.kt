@@ -5,6 +5,7 @@ import cobiss.builder.QueryLimit
 import database.tables.*
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import logging.Logger
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
@@ -27,7 +28,7 @@ import kotlin.concurrent.thread
 /**
  * @author Mihael Berčič on 29. 01. 24.
  */
-class BibliographyParser {
+class BibliographyParser(private val modes: List<String>, fetchDelay: Long) {
 
     private val blockingQueue = LinkedBlockingQueue<BibliographyDivision>()
     private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
@@ -36,9 +37,10 @@ class BibliographyParser {
 
     init {
         thread {
-            println("Started bibliography parser queue thread!")
+            Logger.info("Started bibliography parser queue thread!")
             while (true) {
                 val division = blockingQueue.take()
+                Logger.info("[${division.id}]\tStoring Bibliography division!")
                 division.entryList?.entries?.forEach { entry ->
                     val title = entry.titleShort
                     val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
@@ -51,6 +53,8 @@ class BibliographyParser {
                     val publishedLocation = entry.bibSet?.firstOrNull()
                     val publishedName = publishedLocation?.titleShort ?: ""
                     val publishedISSN = entry.issn?.firstOrNull() ?: ""
+                    val keywords = entry.descriptors.orEmpty().plus(entry.topicalNames.orEmpty()).map(String::trim)
+                    val url = entry.url?.trim().orEmpty()
                     // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
 
                     val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
@@ -62,6 +66,8 @@ class BibliographyParser {
                         this.doi = doi
                         this.publishedName = publishedName
                         this.publishedISSN = publishedISSN
+                        this.url = url
+                        this.keywords = keywords.joinToString(",")
                     }
                     val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
                     val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
@@ -110,8 +116,11 @@ class BibliographyParser {
                         }
                     }
                 }
+                Logger.info("[${division.id}]\tStored Bibliography division! In queue: ${blockingQueue.size} more!")
             }
         }
+
+        getBibliographies(modes.contains("prepare"), modes.contains("fetch"), fetchDelay)
     }
 
     fun parseBibliographies(mstids: List<Int>) {
@@ -119,62 +128,28 @@ class BibliographyParser {
             GlobalScope.launch {
                 try {
                     val serializer: Serializer = Persister()
-                    val dataFetch = serializer.read(BibliographyPojo::class.java, File("bibliographies/$mstid.xml"))
+                    val file = File("bibliographies/$mstid.xml")
+                    if (!file.exists()) {
+                        // Logger.error("Missing bibliographies/$mstid.xml")
+                        return@launch
+                    }
+                    Logger.info("Parsing bibliographies/$mstid.xml")
+                    val dataFetch = serializer.read(BibliographyPojo::class.java, file)
                     dataFetch.divisions.forEach {
                         storeDivision(it)
                     }
                 } catch (e: Exception) {
-                    println("Error happened when trying to read bibliography for $mstid...")
+                    Logger.error("Error happened when trying to read bibliography for $mstid...")
                     e.printStackTrace()
                 }
             }
         }
+        Logger.info("Finished parsing bibliographies for ${mstids.size} researchers.")
     }
 
     private fun storeDivision(division: BibliographyDivision) {
         blockingQueue.add(division)
         division.divisions.forEach { storeDivision(it) }
-    }
-
-
-    private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
-        val bibliographyUrl = transaction { BibliographyUrl.findById(mstid) } ?: throw Exception("No such URL for $mstid.")
-        val file = File("bibliographies/$mstid.${outputFormat.extension}")
-        URI(bibliographyUrl.url).toURL().openStream().use { it.transferTo(file.outputStream()) }
-    }
-
-    private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
-        val researcher = transaction { ResearcherEntity.findById(mstid) } ?: throw NoSuchElementException("No researcher with mstid: $mstid")
-        val title = researcher.title.takeIf { it.isNotBlank() }?.plus('+') ?: ""
-        val firstName = researcher.firstName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
-        val lastName = researcher.lastName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
-        val code = URLEncoder.encode("[$mstid]", Charset.defaultCharset())
-
-        val form = "fullName=$title$firstName+$lastName+$code&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
-        val request =
-            HttpRequest.newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid")).header("Content-Type", "application/x-www-form-urlencoded").header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
-                .POST(HttpRequest.BodyPublishers.ofString(form)).build()
-
-        val currentTime = LocalDateTime.now(timezone)
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-        val timeFormat = currentTime.format(dateTimeFormatter)
-        val urlPath = response.uri().toURL().toString()
-        println("${"$mstid".padEnd(10)} @ $timeFormat => ${urlPath.padEnd(50)} ${response.statusCode()}")
-
-        transaction {
-            val existingBibliography = BibliographyUrl.findById(researcher.id.value)
-            val statement: BibliographyUrl.() -> Unit = {
-                this.researcher = researcher.id
-                this.url = urlPath
-                this.downloaded = false
-            }
-            existingBibliography?.apply(statement) ?: BibliographyUrl.new(statement)
-        }/*
-    val decoder = XMLDecoder(localTmpXMLFile.inputStream()).use {
-         println(it.readObject())
-     }
-     */
-
     }
 
     /**
@@ -188,6 +163,9 @@ class BibliographyParser {
      *
      */
 
+    /**
+     * Store all researchers in the database.
+     */
     private fun fetchResearchers(client: CobissClient) {
         val researchers = client.researchers.newQuery().limit(QueryLimit.All).fetch()
         researchers.forEach { researcher ->
@@ -216,10 +194,13 @@ class BibliographyParser {
                 val existingResearcher = ResearcherEntity.findById(mstid)
                 existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(researcherEntityStatement)
             }
-            println("Finished adding ${researcher.mstid} to researchers.")
+            Logger.info("Finished adding ${researcher.mstid} to researchers.")
         }
     }
 
+    /**
+     * Prepare and/or fetch the bibliographies. Use this instead of [fetchBibliographies] and [prepareBibliographies].
+     */
     private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
         val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(120)
         chunks.forEach { chunk ->
@@ -229,7 +210,7 @@ class BibliographyParser {
                         prepareBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
                         Thread.sleep(delay)
                     } catch (e: Exception) {
-                        println("Error happened [prepare] for $id")
+                        Logger.info("Error happened [prepare] for $id")
                         e.printStackTrace()
                     }
                 }
@@ -241,13 +222,16 @@ class BibliographyParser {
                     fetchBibliographyForResearcher(id, BibliographyOutputFormat.Xml)
                     Thread.sleep(delay)
                 } catch (e: Exception) {
-                    println("Error happened [fetch] for $id")
+                    Logger.error("Error happened [fetch] for $id")
                     e.printStackTrace()
                 }
             }
         }
     }
 
+    /**
+     * Fetch the previously prepared bibliographies and store them on device in bibliographies folder.
+     */
     private fun fetchBibliographies(delay: Long) {
         val urls = transaction { BibliographyUrl.all().toList() }
         val bibliographiesDirectory = File("bibliographies").mkdir()
@@ -259,6 +243,9 @@ class BibliographyParser {
         }
     }
 
+    /**
+     * Request the bibliography computation on sicris servers.
+     */
     private fun prepareBibliographies(delay: Long) {
         val researchers = transaction { ResearcherEntity.all().map { it.mstid } }
         researchers.forEach {
@@ -269,5 +256,48 @@ class BibliographyParser {
             }
             Thread.sleep(delay)
         }
+    }
+
+
+    /**
+     * Individual fetch function for bibliography of a researcher.
+     */
+    private fun fetchBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
+        val bibliographyUrl = transaction { BibliographyUrl.findById(mstid) } ?: throw Exception("No such URL for $mstid.")
+        val file = File("bibliographies/$mstid.${outputFormat.extension}")
+        URI(bibliographyUrl.url).toURL().openStream().use { it.transferTo(file.outputStream()) }
+    }
+
+    /**
+     * Individual prepare function for bibliography of a researcher.
+     */
+    private fun prepareBibliographyForResearcher(mstid: Int, outputFormat: BibliographyOutputFormat) {
+        val researcher = transaction { ResearcherEntity.findById(mstid) } ?: throw NoSuchElementException("No researcher with mstid: $mstid")
+        val title = researcher.title.takeIf { it.isNotBlank() }?.plus('+') ?: ""
+        val firstName = researcher.firstName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
+        val lastName = researcher.lastName.split(" ").joinToString("+") { URLEncoder.encode(it, Charset.defaultCharset()) }
+        val code = URLEncoder.encode("[$mstid]", Charset.defaultCharset())
+
+        val form = "fullName=$title$firstName+$lastName+$code&uniqueCode=$mstid&biblioUrl=&errorMsg=&researchers=&fromYear=&toYear=&biblioFormat=ISO&outputFormat=${outputFormat.abbreviation}&science=T&altmetrics=none&unit=ZS&email="
+        val request =
+            HttpRequest.newBuilder(URI("https://bib.cobiss.net/biblioweb/eval/si/slv/evalrsr/$mstid")).header("Content-Type", "application/x-www-form-urlencoded").header("Cookie", "JSESSIONID=-67qlC8bvTt_Q8sOr6kSoDcBlj1UzvDA81g8v_3g.praabw02")
+                .POST(HttpRequest.BodyPublishers.ofString(form)).build()
+
+        val currentTime = LocalDateTime.now(timezone)
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+        val timeFormat = currentTime.format(dateTimeFormatter)
+        val urlPath = response.uri().toURL().toString()
+        Logger.debug("${"$mstid".padEnd(10)} @ $timeFormat => ${urlPath.padEnd(50)} ${response.statusCode()}")
+
+        transaction {
+            val existingBibliography = BibliographyUrl.findById(researcher.id.value)
+            val statement: BibliographyUrl.() -> Unit = {
+                this.researcher = researcher.id
+                this.url = urlPath
+                this.downloaded = false
+            }
+            existingBibliography?.apply(statement) ?: BibliographyUrl.new(statement)
+        }
+
     }
 }

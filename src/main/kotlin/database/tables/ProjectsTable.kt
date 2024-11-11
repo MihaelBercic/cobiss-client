@@ -48,6 +48,12 @@ object ProjectOrganizationsTable : Table("project_organizations") {
     override val primaryKey: PrimaryKey = PrimaryKey(project, organization)
 }
 
+object ProjectLeadersTable : Table("project_leaders") {
+    val project = reference("project", ProjectsTable)
+    val leader = reference("leader", ResearchersTable)
+    override val primaryKey: PrimaryKey = PrimaryKey(project, leader)
+}
+
 class ProjectEntity(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<ProjectEntity>(ProjectsTable)
 

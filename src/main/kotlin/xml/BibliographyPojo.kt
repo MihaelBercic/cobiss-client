@@ -86,6 +86,15 @@ class BibliographyEntry {
     @field:ElementList(required = false, name = "ISSN", inline = true)
     var issn: List<String>? = null
 
+    @field:ElementList(required = false, entry = "Descriptors", inline = true)
+    var descriptors: List<String>? = null
+
+    @field:ElementList(required = false, entry = "TopicalName", inline = true)
+    var topicalNames: List<String>? = null
+
+    @field:Element(required = false, name = "COBISS")
+    var url: String? = null
+
 }
 
 @Root(name = "BiblioSet", strict = false)

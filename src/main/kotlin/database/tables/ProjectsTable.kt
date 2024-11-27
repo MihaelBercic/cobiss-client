@@ -4,6 +4,7 @@ import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IdTable
+import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.javatime.date
@@ -11,8 +12,7 @@ import org.jetbrains.exposed.sql.javatime.date
 /**
  * @author Mihael Berčič on 3. 01. 24.
  */
-object ProjectsTable : IdTable<Int>("projects_table") {
-    val projectId = integer("project_id")
+object ProjectsTable : IntIdTable("projects_table") {
     val startDate = date("start")
     val endDate = date("end")
     val title = varchar("title", 255)
@@ -33,7 +33,6 @@ object ProjectsTable : IdTable<Int>("projects_table") {
     val statadm = varchar("statadm", 255)
     val statdate = varchar("statdate", 255)
     val type = varchar("type", 255)
-    override val id: Column<EntityID<Int>> = projectId.entityId()
 }
 
 object ProjectsResearcherTable : Table("projects_researchers") {
@@ -57,7 +56,6 @@ object ProjectLeadersTable : Table("project_leaders") {
 class ProjectEntity(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<ProjectEntity>(ProjectsTable)
 
-    var projectId by ProjectsTable.projectId
     var startDate by ProjectsTable.startDate
     var endDate by ProjectsTable.endDate
     var title by ProjectsTable.title

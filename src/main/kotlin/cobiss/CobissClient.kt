@@ -1,5 +1,6 @@
 package cobiss
 
+import cobiss.builder.organisation.OrganisationAPI
 import cobiss.builder.project.ProjectsAPI
 import cobiss.builder.researcher.ResearchersAPI
 import kotlinx.serialization.Serializable
@@ -51,5 +52,7 @@ class CobissClient(private val username: String, private val password: String, p
 
     val projects get() = ProjectsAPI(this)
     val researchers get() = ResearchersAPI(this)
+    val organisations get() = OrganisationAPI(this)
 
+    // 36213 kikiriki
 }

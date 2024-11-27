@@ -3,13 +3,10 @@
  */
 package logging
 
-import kotlinx.serialization.Serializable
 import java.io.PrintWriter
 import java.io.StringWriter
-import java.net.http.HttpClient
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * Created by Mihael Berčič
@@ -35,11 +32,15 @@ object Logger {
     const val reset = "\u001B[0m"
 
     /** Prints the given message with the coloring and debug information provided.*/
-    private fun log(debugType: DebugType, message: Any, color: String = black) {
+    private fun log(debugType: DebugType, message: Any, color: String = black, sameLine: Boolean = false) {
         if (isLoggingEnabled) {
             val typeString = LocalDateTime.now().format(timeFormatter).padEnd(11) + " | " + padRight(debugType.name)
             val output = "$color$typeString$reset$message"
-            println(output)
+            if (sameLine) {
+                print("\r$output")
+            } else {
+                println(output)
+            }
         }
     }
 
@@ -61,10 +62,10 @@ object Logger {
         }
     }
 
-    fun info(message: Any) = log(DebugType.INFO, message, green)
-    fun debug(message: Any) = log(DebugType.DEBUG, message, magenta)
-    fun error(message: Any) = log(DebugType.ERROR, message, red)
-    fun trace(message: Any) = log(DebugType.TRACE, message, yellow)
+    fun info(message: Any, sameLine: Boolean = false) = log(DebugType.INFO, message, green, sameLine)
+    fun debug(message: Any, sameLine: Boolean = false) = log(DebugType.DEBUG, message, magenta, sameLine)
+    fun error(message: Any, sameLine: Boolean = false) = log(DebugType.ERROR, message, red, sameLine)
+    fun trace(message: Any, sameLine: Boolean = false) = log(DebugType.TRACE, message, yellow, sameLine)
 
     /** Pads the string with the default character of ' ' at the end. */
     private fun padRight(string: String) = string.padEnd(12)

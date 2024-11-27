@@ -4,15 +4,14 @@ import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IdTable
+import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.Column
 
 /**
  * @author Mihael Berčič on 29. 01. 24.
  */
-object OrganizationTable : IdTable<Int>("organization") {
+object OrganizationTable : IntIdTable("organization") {
     val frame = varchar("frame", 255).nullable()
-    val organizationId = integer("organization_id")
-    override val id: Column<EntityID<Int>> = organizationId.entityId()
     val stat = varchar("stat", 255).nullable()
     val statadm = varchar("statadm", 255).nullable()
     val statdate = varchar("statdate", 255).nullable()
@@ -37,7 +36,6 @@ class OrganizationEntity(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<OrganizationEntity>(OrganizationTable)
 
     var frame by OrganizationTable.frame
-    var organizationId by OrganizationTable.organizationId
     var stat by OrganizationTable.stat
     var statadm by OrganizationTable.statadm
     var statdate by OrganizationTable.statdate

@@ -1,10 +1,6 @@
 package xml
 
-import cobiss.CobissClient
-import cobiss.builder.QueryLimit
 import database.tables.*
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import logging.Logger
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
@@ -22,118 +18,125 @@ import java.nio.charset.Charset
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
-import kotlin.concurrent.thread
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * @author Mihael Berčič on 29. 01. 24.
  */
-class BibliographyParser(private val modes: List<String>, fetchDelay: Long) {
+class BibliographyParser() {
 
     private val blockingQueue = LinkedBlockingQueue<BibliographyDivision>()
     private val httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("YYYYMMdd_HHmmss")
     private val timezone = ZoneId.of("UTC+1")
 
-    init {
-        thread {
-            Logger.info("Started bibliography parser queue thread!")
-            while (true) {
-                val division = blockingQueue.take()
-                Logger.info("[${division.id}]\tStoring Bibliography division!")
-                division.entryList?.entries?.forEach { entry ->
-                    val title = entry.titleShort
-                    val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
-                    val authorNames = entry.authorsGroup?.authors ?: emptyList()
-                    val slovenianAuthors = transaction { authorNames.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
-                    val foreignAuthors = authorNames.filter { author -> slovenianAuthors.none { "${it.firstName}${it.lastName}" == "${author.firstName}${author.lastName}" } }
-                    val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
-                    val typology = entry.typology?.code ?: ""
-                    val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
-                    val publishedLocation = entry.bibSet?.firstOrNull()
-                    val publishedName = publishedLocation?.titleShort ?: ""
-                    val publishedISSN = entry.issn?.firstOrNull() ?: ""
-                    val keywords = entry.descriptors.orEmpty().plus(entry.topicalNames.orEmpty()).map(String::trim)
-                    val url = entry.url?.trim().orEmpty()
-                    // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
+    private fun processDivision(division: BibliographyDivision, number: Number) {
+        val total = division.entryList?.entries?.size ?: 0
+        division.entryList?.entries?.forEachIndexed { index, entry ->
+            time("[$number\t|\t$index \t/\t $total\t] Entry", false) {
+                val title = entry.titleShort
+                val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
+                val authorNames = entry.authorsGroup?.authors ?: emptyList()
+                val slovenianAuthors = transaction { authorNames.mapNotNull { it.codeRes?.toIntOrNull()?.let(ResearcherEntity::findById) } ?: emptyList() }
+                val foreignAuthors = authorNames.filter { author -> slovenianAuthors.none { "${it.firstName}${it.lastName}" == "${author.firstName}${author.lastName}" } }
+                val publicationYear = entry.publicationYear?.toIntOrNull() ?: 1900
+                val typology = entry.typology?.code ?: ""
+                val doi = entry.identifier?.firstOrNull()?.dois?.firstOrNull()?.value ?: ""
+                val publishedLocation = entry.bibSet?.firstOrNull()
+                val publishedName = publishedLocation?.titleShort ?: ""
+                val publishedISSN = entry.issn?.firstOrNull() ?: ""
+                val keywords = entry.descriptors.orEmpty().plus(entry.topicalNames.orEmpty()).map(String::trim)
+                val url = entry.url?.trim().orEmpty()
 
-                    val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
-                    val paperStatement: PaperEntity.() -> Unit = {
-                        this.title = title
-                        this.points = points
-                        this.publicationYear = publicationYear
-                        this.typology = typology
-                        this.doi = doi
-                        this.publishedName = publishedName
-                        this.publishedISSN = publishedISSN
-                        this.url = url
-                        this.keywords = keywords.joinToString(",")
-                    }
-                    val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
-                    val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
-                    val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
-                    orderedAuthors.forEach { (index, author) ->
-                        transaction {
-                            try {
-                                val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
-                                if (!relationExists) {
-                                    PapersResearcherTable.insert {
-                                        it[PapersResearcherTable.paper] = paper.id
-                                        it[researcher] = author.id
-                                        it[position] = index
-                                    }
+                // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
+                val existingPaper = transaction { PaperEntity.find { PapersTable.doi eq doi }.firstOrNull() }
+                val paperStatement: PaperEntity.() -> Unit = {
+                    this.title = title
+                    this.points = points
+                    this.publicationYear = publicationYear
+                    this.typology = typology
+                    this.doi = doi
+                    this.publishedName = publishedName
+                    this.publishedISSN = publishedISSN
+                    this.url = url
+                    this.keywords = keywords.joinToString(",")
+                }
+                val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
+                val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
+                val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
+                orderedAuthors.forEach { (index, author) ->
+                    transaction {
+                        try {
+                            val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
+                            if (!relationExists) {
+                                PapersResearcherTable.insert {
+                                    it[PapersResearcherTable.paper] = paper.id
+                                    it[researcher] = author.id
+                                    it[position] = index
                                 }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
                             }
-                        }
-                    }
-                    orderedForeignAuthors.forEach { (index, author) ->
-                        val existingEntity = transaction {
-                            ForeignResearcherEntity.find {
-                                (ForeignResearchersTable.firstName eq (author.firstName ?: "")) and (ForeignResearchersTable.lastName eq (author.lastName ?: ""))
-                            }.firstOrNull()
-                        }
-                        val authorStatement: ForeignResearcherEntity.() -> Unit = {
-                            firstName = author.firstName ?: "Unknown"
-                            lastName = author.lastName ?: "Unknown"
-                        }
-                        val authorEntity = transaction { existingEntity?.apply(authorStatement) ?: ForeignResearcherEntity.new(authorStatement) }
-
-                        transaction {
-                            try {
-                                val relationExists = !ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()
-                                if (!relationExists) {
-                                    ForeignPapersResearcherTable.insert {
-                                        it[ForeignPapersResearcherTable.paper] = paper.id
-                                        it[researcher] = authorEntity.id
-                                        it[position] = index
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
                     }
                 }
-                Logger.info("[${division.id}]\tStored Bibliography division! In queue: ${blockingQueue.size} more!")
+                orderedForeignAuthors.forEach { (index, author) ->
+                    val existingEntity = transaction {
+                        ForeignResearcherEntity.find {
+                            (ForeignResearchersTable.firstName eq (author.firstName ?: "")) and (ForeignResearchersTable.lastName eq (author.lastName ?: ""))
+                        }.firstOrNull()
+                    }
+                    val authorStatement: ForeignResearcherEntity.() -> Unit = {
+                        firstName = author.firstName ?: "Unknown"
+                        lastName = author.lastName ?: "Unknown"
+                    }
+
+                    val authorEntity = transaction { existingEntity?.apply(authorStatement) ?: ForeignResearcherEntity.new(authorStatement) }
+
+
+                    transaction {
+                        try {
+                            val relationExists = !ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()
+                            if (!relationExists) {
+                                ForeignPapersResearcherTable.insert {
+                                    it[ForeignPapersResearcherTable.paper] = paper.id
+                                    it[researcher] = authorEntity.id
+                                    it[position] = index
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+                Logger.info("Processed division number $number.", true)
             }
         }
+    }
 
+    public fun prepareAndFetch(modes: List<String>, fetchDelay: Long) {
         getBibliographies(modes.contains("prepare"), modes.contains("fetch"), fetchDelay)
     }
 
     fun parseBibliographies(mstids: List<Int>) {
-        mstids.forEach { mstid ->
-            GlobalScope.launch {
+        val atomic = AtomicInteger(0)
+        mstids.chunked(100).forEachIndexed { index, chunk ->
+            val threadPool = Executors.newFixedThreadPool(10)
+            chunk.forEach { mstid ->
                 try {
+//                if (atomic.get() >= 100) {
+//                    return@forEach
+//                }
                     val serializer: Serializer = Persister()
                     val file = File("bibliographies/$mstid.xml")
                     if (!file.exists()) {
                         // Logger.error("Missing bibliographies/$mstid.xml")
-                        return@launch
+                        return@forEach
                     }
-                    Logger.info("Parsing bibliographies/$mstid.xml")
+                    // Logger.info("[${atomic.incrementAndGet()}] Parsing bibliographies/$mstid.xml")
                     val dataFetch = serializer.read(BibliographyPojo::class.java, file)
                     dataFetch.divisions.forEach {
                         storeDivision(it)
@@ -143,8 +146,19 @@ class BibliographyParser(private val modes: List<String>, fetchDelay: Long) {
                     e.printStackTrace()
                 }
             }
+            Logger.info("Parser started! ${index * 100} / ${mstids.size}");
+            while (blockingQueue.isNotEmpty()) {
+                val division = blockingQueue.take()
+                val number = blockingQueue.size
+                threadPool.submit {
+                    processDivision(division, number)
+                }
+            }
+            threadPool.shutdown()
+            threadPool.awaitTermination(10, TimeUnit.DAYS)
+            println("")
         }
-        Logger.info("Finished parsing bibliographies for ${mstids.size} researchers.")
+        Logger.info("Finished processing bibliographies for ${mstids.size} researchers.")
     }
 
     private fun storeDivision(division: BibliographyDivision) {
@@ -163,46 +177,23 @@ class BibliographyParser(private val modes: List<String>, fetchDelay: Long) {
      *
      */
 
-    /**
-     * Store all researchers in the database.
-     */
-    private fun fetchResearchers(client: CobissClient) {
-        val researchers = client.researchers.newQuery().limit(QueryLimit.All).fetch()
-        researchers.forEach { researcher ->
-            val firstName = researcher.firstName
-            val lastName = researcher.lastName
-            val title = researcher.title
-            val science = researcher.science
-            val sex = researcher.sex
-            val subfield = researcher.subfield
-            val type = researcher.type
-            val typeDescription = researcher.typeDescription
-            val mstid = researcher.mstid.toInt()
 
-            transaction {
-                val researcherEntityStatement: ResearcherEntity.() -> Unit = {
-                    this.firstName = firstName
-                    this.lastName = lastName
-                    this.title = title
-                    this.science = science.toShortOrNull() ?: -1
-                    this.sex = sex == "M"
-                    this.subfield = subfield
-                    this.type = type
-                    this.mstid = mstid
-                    this.sicrisID = researcher.id
-                }
-                val existingResearcher = ResearcherEntity.findById(mstid)
-                existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(researcherEntityStatement)
-            }
-            Logger.info("Finished adding ${researcher.mstid} to researchers.")
+    private fun <T> time(label: String, logTime: Boolean = true, block: () -> T): T {
+        if (!logTime) {
+            return block()
         }
+        val start = System.currentTimeMillis()
+        val value = block()
+        val elapsed = System.currentTimeMillis() - start
+        Logger.info("$label took ${elapsed}ms")
+        return value
     }
 
     /**
      * Prepare and/or fetch the bibliographies. Use this instead of [fetchBibliographies] and [prepareBibliographies].
      */
     private fun getBibliographies(prepare: Boolean, fetch: Boolean, delay: Long) {
-        val chunks = transaction { ResearcherEntity.all().map { it.mstid } }.chunked(120)
+        val chunks = transaction { ResearcherEntity.all().map { it.id.value } }.chunked(120)
         chunks.forEach { chunk ->
             if (prepare) {
                 chunk.forEach { id ->
@@ -247,7 +238,7 @@ class BibliographyParser(private val modes: List<String>, fetchDelay: Long) {
      * Request the bibliography computation on sicris servers.
      */
     private fun prepareBibliographies(delay: Long) {
-        val researchers = transaction { ResearcherEntity.all().map { it.mstid } }
+        val researchers = transaction { ResearcherEntity.all().map { it.id.value } }
         researchers.forEach {
             try {
                 prepareBibliographyForResearcher(it, BibliographyOutputFormat.Xml)

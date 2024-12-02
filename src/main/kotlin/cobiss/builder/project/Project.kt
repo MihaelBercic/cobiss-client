@@ -36,10 +36,10 @@ data class Project(
 @Serializable
 data class ProjectDetails(
     val active: Boolean,
-    val code: String,
-    val codeContract: String,
-    val codeProgramme: String,
-    val codeScience: String,
+    val code: String = "",
+    val codeContract: String = "",
+    val codeProgramme: String = "",
+    val codeScience: String = "",
     val description: String = "",
     val enddate: String,
     val frame: String,

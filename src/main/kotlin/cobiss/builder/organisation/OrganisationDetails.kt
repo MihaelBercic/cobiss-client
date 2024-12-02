@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class OrganisationDetails(
     val frame: String,
-    val id: Int,
+    // val id: Int,
     val stat: String? = null,
     val statAdn: String? = null,
     val statDate: String? = null,

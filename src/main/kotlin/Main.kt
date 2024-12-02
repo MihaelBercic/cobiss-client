@@ -17,8 +17,11 @@ const val DELAY = 500L
 
 
 fun main(args: Array<String>) {
-    Logger.info("Usage: java -jar x.jar username password delay [modes = prepare, fetch]")
-    Logger.info("If no modes are present, researchers are parsed. Mode prepare = setup BIB export. Mode fetch = download BIB export.")
+    Logger.info("Usage: java -jar x.jar username password delay [modes = prepare, fetch, process]")
+    Logger.info("If no modes are present, researchers are parsed. ")
+    Logger.info("\tprepare = setup BIB export")
+    Logger.info("\tfetch = download BIB export.")
+    Logger.info("\tprocess = process BIBs.")
     Database.connect(
         "jdbc:postgresql://localhost:5432/postgres",
         driver = "org.postgresql.Driver",
@@ -79,7 +82,9 @@ fun main(args: Array<String>) {
     val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.id.value) } }
     bibliographyParser.apply {
         prepareAndFetch(modes, delay)
-        parseBibliographies(researchers.map(ResearcherID::mstid))
+        if (modes.contains("process")) {
+            parseBibliographies(researchers.map(ResearcherID::mstid))
+        }
     }
     if (modes.isEmpty()) {
         val total = researchers.count()
@@ -88,8 +93,7 @@ fun main(args: Array<String>) {
             Logger.info("${++current} / $total")
             val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
             val id = details.mstid.toInt()
-            Logger.info("MSTID: $id")
-            storeProjectsForResearcher(client, details)
+//            storeProjectsForResearcher(client, details)
             storeEducationForResearcher(details)
             storeOrganisationsForResearcher(details)
             Thread.sleep(DELAY)
@@ -112,7 +116,7 @@ private fun storeOrganisationsForResearcher(details: ResearcherDetails) {
             Logger.error("\tUnable to find the organisation: ${employ}!")
         }
     }
-    transaction { researcher.organisations = SizedCollection(organisations) }
+    transaction { researcher.organisations = SizedCollection(organisations.toSet()) }
 }
 
 private fun storeEducationForResearcher(details: ResearcherDetails) {
@@ -130,24 +134,6 @@ private fun storeEducationForResearcher(details: ResearcherDetails) {
                     it[university] = data.university
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-}
-
-private fun storeProjectsForResearcher(client: CobissClient, details: ResearcherDetails) {
-    Logger.info("\tProjects...")
-    val allProjects = details.projects.plus(details.internacionalprojects).mapNotNull {
-        Thread.sleep(DELAY)
-        return@mapNotNull client.projects.findById("${it.id}")
-    }
-    val ourEntity = transaction { ResearcherEntity.findById(details.mstid.toInt()) } ?: throw Error("No researcher found in db.")
-    allProjects.forEach { project ->
-        try {
-            val existingProject = transaction { ProjectEntity.findById(project.id) } ?: throw Error("Project not found!")
-            val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
-            val projectEntity = transaction { existingProject.researchers = SizedCollection(researchers.plus(ourEntity)) }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -237,63 +223,73 @@ fun fetchOrganisations(client: CobissClient) {
  */
 fun fetchProjects(client: CobissClient) {
     val projects = client.projects.newQuery().limit(QueryLimit.All).fetch()
+
     val threadPool = Executors.newFixedThreadPool(20)
     projects.forEach { project ->
         val id = project.id ?: return@forEach
         threadPool.submit {
-            val details = client.projects.findById(id.toString()) ?: return@submit
-            val title = details.name
-            val startDate = LocalDate.parse(details.startdate)
-            val endDate = LocalDate.parse(details.enddate)
-            val fte = details.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
-            val existingProject = transaction { ProjectEntity.findById(id) }
-            val statement: ProjectEntity.() -> Unit = {
-                this.startDate = startDate
-                this.endDate = endDate
-                this.title = title
-                this.field = details.codeScience
-                this.fte = fte
-                this.active = details.active
-                this.code = details.code
-                this.codeContract = details.codeContract
-                this.codeProgramme = details.codeProgramme
-                this.codeScience = details.codeScience
-                this.description = details.description
-                this.frame = details.frame
-                this.fteHoursDescription = details.fteHoursDescription
-                this.hasTender = details.hasTender
-                this.name = details.name
-                this.researcherFullName = details.resaercherFullName
-                this.stat = details.stat
-                this.statadm = details.statadm
-                this.statdate = details.statdate
-                this.type = details.type
 
-                this.organizations = SizedCollection(details.organizations.mapNotNull { OrganizationEntity.findById(it.id) })
-                this.researchers = SizedCollection()
-            }
-            val projectEntity = transaction { existingProject?.apply(statement) ?: ProjectEntity.new(details.id, statement) }
+            try {
+                val details = client.projects.findById(id.toString()) ?: return@submit
+                val title = details.name
+                val startDate = LocalDate.parse(details.startdate)
+                val endDate = LocalDate.parse(details.enddate)
+                val fte = details.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
+                val existingProject = transaction { ProjectEntity.findById(id) }
+                val researchers = transaction { details.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
+                val statement: ProjectEntity.() -> Unit = {
+                    this.startDate = startDate
+                    this.endDate = endDate
+                    this.title = title
+                    this.field = details.codeScience
+                    this.fte = fte
+                    this.active = details.active
+                    this.code = details.code
+                    this.codeContract = details.codeContract
+                    this.codeProgramme = details.codeProgramme
+                    this.codeScience = details.codeScience
+                    this.description = details.description
+                    this.frame = details.frame
+                    this.fteHoursDescription = details.fteHoursDescription
+                    this.hasTender = details.hasTender
+                    this.name = details.name
+                    this.researcherFullName = details.resaercherFullName
+                    this.stat = details.stat
+                    this.statadm = details.statadm
+                    this.statdate = details.statdate
+                    this.type = details.type
 
-            // Attempt to find leader using title first (dr. Mihael Berčič) and if unsuccessful without the title. (Mihael Berčič).
-            val leader = transaction {
-                ResearcherEntity.find {
-                    concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
-                }.firstOrNull()
-                    ?: ResearcherEntity.find {
-                        concat(ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
-                    }.firstOrNull()
-            }
-            Logger.debug("Leader: ${leader?.firstName} ${leader?.lastName} for: ${details.resaercherFullName}")
-            if (leader != null) {
-                val leadingProjects = leader.leadingProjects
-                transaction {
-                    leader.leadingProjects = SizedCollection(leadingProjects.plus(projectEntity))
+                    this.organizations = SizedCollection(details.organizations.mapNotNull { OrganizationEntity.findById(it.id) }.toSet())
+                    this.researchers = SizedCollection(researchers.toSet())
                 }
+                val projectEntity = transaction { existingProject?.apply(statement) ?: ProjectEntity.new(details.id, statement) }
+
+                // Attempt to find leader using title first (dr. Mihael Berčič) and if unsuccessful without the title. (Mihael Berčič).
+                val leader = transaction {
+                    ResearcherEntity.find {
+                        concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
+                    }.firstOrNull()
+                        ?: ResearcherEntity.find {
+                            concat(ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
+                        }.firstOrNull()
+                }
+                if (leader != null) {
+                    transaction {
+                        val leadingProjects = leader.leadingProjects
+                        leader.leadingProjects = SizedCollection(leadingProjects.plus(projectEntity).toSet())
+                        leader.flush()
+                    }
+                } else {
+                    Logger.error("Leader not found for ${details.resaercherFullName}")
+                }
+                Logger.info("Finished adding ${details.id} to projects.")
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            Logger.info("Finished adding ${details.id} to projects.")
         }
     }
     threadPool.shutdown()
     threadPool.awaitTermination(1, TimeUnit.HOURS)
-    Logger.debug("Finished organisation fetch!")
+    Logger.debug("Finished projects fetch!")
+
 }

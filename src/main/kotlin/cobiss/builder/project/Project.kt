@@ -50,7 +50,7 @@ data class ProjectDetails(
     // val oldReports: List<String>,
     val organizations: List<Organization>,
     @SerialName("project") val projectInformation: Project,
-    val projectId: String,
+    // val projectId: String,
     // val reportMeta: List<String>,
     val resaercherFullName: String,
     val researchers: List<Researcher>,
@@ -77,7 +77,7 @@ data class Contact(
 @Serializable
 data class Organization(
     val frame: String? = null,
-    val id: Int? = null,
+    val id: Int,
     val stat: String? = null,
     val statadm: String? = null,
     val statdate: String? = null,

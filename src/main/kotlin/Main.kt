@@ -1,8 +1,6 @@
 import cobiss.CobissClient
 import cobiss.Language
 import cobiss.builder.QueryLimit
-import cobiss.builder.project.Organization
-import cobiss.builder.project.ProjectDetails
 import cobiss.builder.researcher.ResearcherDetails
 import database.tables.*
 import logging.Logger
@@ -56,6 +54,15 @@ fun main(args: Array<String>) {
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
     File("bibliographies").mkdir()
     val bibliographyParser = BibliographyParser()
+
+
+//        val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
+//        storeProjectsForResearcher(client, tosic)
+//        storeEducationForResearcher(tosic)
+//        BibliographyParser().parseBibliographies(listOf(tosic.mstid.toInt()))
+//        return
+
+
     if (transaction { ResearcherEntity.all().empty() }) {
         Logger.info("Fetching researchers to populate the database!")
         fetchResearchers(client)
@@ -64,12 +71,16 @@ fun main(args: Array<String>) {
         Logger.info("Fetching organisations to populate the database!")
         fetchOrganisations(client)
     }
+    if (transaction { ProjectEntity.all().empty() }) {
+        Logger.info("Fetching projects to populate the database!")
+        fetchProjects(client)
+    }
+
     val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.id.value) } }
     bibliographyParser.apply {
         prepareAndFetch(modes, delay)
         parseBibliographies(researchers.map(ResearcherID::mstid))
     }
-//        .filter { it.sicrisId == 41529 } // SANDI
     if (modes.isEmpty()) {
         val total = researchers.count()
         var current = 0
@@ -77,7 +88,7 @@ fun main(args: Array<String>) {
             Logger.info("${++current} / $total")
             val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
             val id = details.mstid.toInt()
-            Logger.info("SICRIS: ${details.id} \t MSTID: $id")
+            Logger.info("MSTID: $id")
             storeProjectsForResearcher(client, details)
             storeEducationForResearcher(details)
             storeOrganisationsForResearcher(details)
@@ -85,13 +96,6 @@ fun main(args: Array<String>) {
         }
     }
     Logger.info("Done.");
-    /*
-        val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
-        storeProjectsForResearcher(client, tosic)
-        storeEducationForResearcher(tosic)
-        BibliographyParser().parseBibliographies(listOf(tosic.mstid.toInt()))
-        return
-     */
 }
 
 private fun storeOrganisationsForResearcher(details: ResearcherDetails) {
@@ -134,91 +138,20 @@ private fun storeEducationForResearcher(details: ResearcherDetails) {
 
 private fun storeProjectsForResearcher(client: CobissClient, details: ResearcherDetails) {
     Logger.info("\tProjects...")
-    val projectDetails = details.projects.mapNotNull {
-        val details = client.projects.findById("${it.id}")
+    val allProjects = details.projects.plus(details.internacionalprojects).mapNotNull {
         Thread.sleep(DELAY)
-        return@mapNotNull details
+        return@mapNotNull client.projects.findById("${it.id}")
     }
-    projectDetails.forEach { project ->
-        storeProjectInformation(project)
-    }
-}
-
-private fun storeProjectInformation(project: ProjectDetails) {
-    val title = project.name
-    val startDate = LocalDate.parse(project.startdate)
-    val endDate = LocalDate.parse(project.enddate)
-    val fte = project.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
-    val leader = transaction {
-        ResearcherEntity.find {
-            concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq project.resaercherFullName
-        }.firstOrNull()
-    }
-    try {
-        val existingProject = transaction { ProjectEntity.findById(project.id) }
-        val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
-        val statement: ProjectEntity.() -> Unit = {
-            this.startDate = startDate
-            this.endDate = endDate
-            this.title = title
-            this.field = project.codeScience
-            this.fte = fte
-            this.active = project.active
-            this.code = project.code
-            this.codeContract = project.codeContract
-            this.codeProgramme = project.codeProgramme
-            this.codeScience = project.codeScience
-            this.description = project.description
-            this.frame = project.frame
-            this.fteHoursDescription = project.fteHoursDescription
-            this.hasTender = project.hasTender
-            this.name = project.name
-            this.researcherFullName = project.resaercherFullName
-            this.stat = project.stat
-            this.statadm = project.statadm
-            this.statdate = project.statdate
-            this.type = project.type
-
-            this.organizations = SizedCollection(project.organizations.mapNotNull { findOrCreateOrganization(it) })
-            this.researchers = SizedCollection(researchers)
+    val ourEntity = transaction { ResearcherEntity.findById(details.mstid.toInt()) } ?: throw Error("No researcher found in db.")
+    allProjects.forEach { project ->
+        try {
+            val existingProject = transaction { ProjectEntity.findById(project.id) } ?: throw Error("Project not found!")
+            val researchers = transaction { project.researchers.mapNotNull { ResearcherEntity.findById(it.mstid.toInt()) } }
+            val projectEntity = transaction { existingProject.researchers = SizedCollection(researchers.plus(ourEntity)) }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        val projectEntity = transaction { existingProject?.apply(statement) ?: ProjectEntity.new(project.id, statement) }
-        if (leader != null) {
-            val leadingProjects = leader.leadingProjects ?: mutableListOf<ProjectEntity>()
-            transaction {
-                leader.leadingProjects = SizedCollection(leadingProjects.plus(projectEntity))
-            }
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
     }
-}
-
-private fun findOrCreateOrganization(organization: Organization): OrganizationEntity? {
-    if (organization.id == null) return null
-    val existing = transaction { OrganizationEntity.findById(organization.id) }
-    val statement: OrganizationEntity.() -> Unit = {
-        this.frame = organization.frame
-        this.stat = organization.stat
-        this.statadm = organization.statadm
-        this.statdate = organization.statdate
-        this.type = organization.type
-        this.counter = organization.counter
-        this.field = organization.field
-        this.science = organization.science
-        this.subfield = organization.subfield
-        this.city = organization.city
-        this.mstid = organization.mstid
-        this.name = organization.name
-        this.regnum = organization.regnum
-        this.remark = organization.remark
-        this.rolecode = organization.rolecode
-        this.sigla = organization.sigla
-        this.ssm = organization.ssm
-        this.statfrm = organization.statfrm
-        this.taxnum = organization.taxnum
-    }
-    return transaction { existing?.apply(statement) ?: OrganizationEntity.new(organization.id, statement) }
 }
 
 data class ResearcherID(val sicrisId: Int, val mstid: Int)
@@ -237,7 +170,6 @@ fun fetchResearchers(client: CobissClient) {
         val sex = researcher.sex
         val subfield = researcher.subfield
         val type = researcher.type
-        val typeDescription = researcher.typeDescription
         val mstid = researcher.mstid.toInt()
 
         threadPool.submit {
@@ -293,6 +225,72 @@ fun fetchOrganisations(client: CobissClient) {
                 existingResearcher?.apply(organisationEntityStatement) ?: OrganizationEntity.new(mstid, organisationEntityStatement)
             }
             Logger.info("Finished adding ${organisation.mstid} to organisations.")
+        }
+    }
+    threadPool.shutdown()
+    threadPool.awaitTermination(1, TimeUnit.HOURS)
+    Logger.debug("Finished organisation fetch!")
+}
+
+/**
+ * Store all projects in the database.
+ */
+fun fetchProjects(client: CobissClient) {
+    val projects = client.projects.newQuery().limit(QueryLimit.All).fetch()
+    val threadPool = Executors.newFixedThreadPool(20)
+    projects.forEach { project ->
+        val id = project.id ?: return@forEach
+        threadPool.submit {
+            val details = client.projects.findById(id.toString()) ?: return@submit
+            val title = details.name
+            val startDate = LocalDate.parse(details.startdate)
+            val endDate = LocalDate.parse(details.enddate)
+            val fte = details.fteHoursDescription.split(" ")[0].toDoubleOrNull() ?: 0.0
+            val existingProject = transaction { ProjectEntity.findById(id) }
+            val statement: ProjectEntity.() -> Unit = {
+                this.startDate = startDate
+                this.endDate = endDate
+                this.title = title
+                this.field = details.codeScience
+                this.fte = fte
+                this.active = details.active
+                this.code = details.code
+                this.codeContract = details.codeContract
+                this.codeProgramme = details.codeProgramme
+                this.codeScience = details.codeScience
+                this.description = details.description
+                this.frame = details.frame
+                this.fteHoursDescription = details.fteHoursDescription
+                this.hasTender = details.hasTender
+                this.name = details.name
+                this.researcherFullName = details.resaercherFullName
+                this.stat = details.stat
+                this.statadm = details.statadm
+                this.statdate = details.statdate
+                this.type = details.type
+
+                this.organizations = SizedCollection(details.organizations.mapNotNull { OrganizationEntity.findById(it.id) })
+                this.researchers = SizedCollection()
+            }
+            val projectEntity = transaction { existingProject?.apply(statement) ?: ProjectEntity.new(details.id, statement) }
+
+            // Attempt to find leader using title first (dr. Mihael Berčič) and if unsuccessful without the title. (Mihael Berčič).
+            val leader = transaction {
+                ResearcherEntity.find {
+                    concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
+                }.firstOrNull()
+                    ?: ResearcherEntity.find {
+                        concat(ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
+                    }.firstOrNull()
+            }
+            Logger.debug("Leader: ${leader?.firstName} ${leader?.lastName} for: ${details.resaercherFullName}")
+            if (leader != null) {
+                val leadingProjects = leader.leadingProjects
+                transaction {
+                    leader.leadingProjects = SizedCollection(leadingProjects.plus(projectEntity))
+                }
+            }
+            Logger.info("Finished adding ${details.id} to projects.")
         }
     }
     threadPool.shutdown()

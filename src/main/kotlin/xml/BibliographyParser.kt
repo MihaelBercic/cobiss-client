@@ -70,8 +70,7 @@ class BibliographyParser() {
                 orderedAuthors.forEach { (index, author) ->
                     transaction {
                         try {
-                            val relationExists = !PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()
-                            if (!relationExists) {
+                            if (PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()) {
                                 PapersResearcherTable.insert {
                                     it[PapersResearcherTable.paper] = paper.id
                                     it[researcher] = author.id
@@ -99,8 +98,7 @@ class BibliographyParser() {
 
                     transaction {
                         try {
-                            val relationExists = !ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()
-                            if (!relationExists) {
+                            if (ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()) {
                                 ForeignPapersResearcherTable.insert {
                                     it[ForeignPapersResearcherTable.paper] = paper.id
                                     it[researcher] = authorEntity.id

@@ -56,15 +56,16 @@ fun main(args: Array<String>) {
     val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
     File("bibliographies").mkdir()
+
+    Logger.debug("Running with modes: ${modes.joinToString()}")
     val bibliographyParser = BibliographyParser()
 
 
-//        val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
+//    val tosic = client.researchers.findById("41529") ?: throw Error("No researcher found in cobiss.")
 //        storeProjectsForResearcher(client, tosic)
 //        storeEducationForResearcher(tosic)
-//        BibliographyParser().parseBibliographies(listOf(tosic.mstid.toInt()))
-//        return
-
+//    bibliographyParser.parseBibliographies(listOf(53879))
+//    return
 
     if (transaction { ResearcherEntity.all().empty() }) {
         Logger.info("Fetching researchers to populate the database!")
@@ -225,10 +226,9 @@ fun fetchProjects(client: CobissClient) {
     val projects = client.projects.newQuery().limit(QueryLimit.All).fetch()
 
     val threadPool = Executors.newFixedThreadPool(20)
-    projects.forEach { project ->
+    projects.toSet().forEach { project ->
         val id = project.id ?: return@forEach
         threadPool.submit {
-
             try {
                 val details = client.projects.findById(id.toString()) ?: return@submit
                 val title = details.name

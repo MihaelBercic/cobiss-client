@@ -22,6 +22,7 @@ object PapersTable : IntIdTable("papers") {
     val points = double("points")
     val keywords = text("keywords").nullable()
     val url = varchar("url", 255).nullable()
+    val language = varchar("language", 255).nullable()
 }
 
 class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
@@ -36,6 +37,7 @@ class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
     var points by PapersTable.points
     var keywords by PapersTable.keywords
     var url by PapersTable.url
+    var language by PapersTable.language
 }
 
 object PapersResearcherTable : Table("papers_researchers") {

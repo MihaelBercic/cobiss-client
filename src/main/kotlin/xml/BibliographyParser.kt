@@ -4,6 +4,7 @@ import database.tables.*
 import logging.Logger
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.simpleframework.xml.Serializer
@@ -50,6 +51,7 @@ class BibliographyParser() {
                 val publishedISSN = entry.issn?.firstOrNull() ?: ""
                 val keywords = entry.descriptors.orEmpty().plus(entry.topicalNames.orEmpty()).map(String::trim)
                 val url = entry.url?.trim().orEmpty()
+                val language = entry.language?.joinToString()
 
                 // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
                 val existingPaper = transaction { PaperEntity.find { PapersTable.doi eq doi }.firstOrNull() }
@@ -63,6 +65,7 @@ class BibliographyParser() {
                     this.publishedISSN = publishedISSN
                     this.url = url
                     this.keywords = keywords.joinToString(",")
+                    this.language = language
                 }
                 val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
                 val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
@@ -71,7 +74,7 @@ class BibliographyParser() {
                     transaction {
                         try {
                             if (PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()) {
-                                PapersResearcherTable.insert {
+                                PapersResearcherTable.insertIgnore {
                                     it[PapersResearcherTable.paper] = paper.id
                                     it[researcher] = author.id
                                     it[position] = index
@@ -135,7 +138,7 @@ class BibliographyParser() {
                         return@forEach
                     }
                     // Logger.info("[${atomic.incrementAndGet()}] Parsing bibliographies/$mstid.xml")
-                    val dataFetch = serializer.read(BibliographyPojo::class.java, file)
+                    val dataFetch = serializer.read(BibliographyPojo::class.java, file, false)
                     dataFetch.divisions.forEach {
                         storeDivision(it)
                     }
@@ -154,7 +157,6 @@ class BibliographyParser() {
             }
             threadPool.shutdown()
             threadPool.awaitTermination(10, TimeUnit.DAYS)
-            println("")
         }
         Logger.info("Finished processing bibliographies for ${mstids.size} researchers.")
     }

@@ -65,6 +65,9 @@ class BibliographyEntry {
     @field:Element(name = "TitleShort")
     var titleShort: String = ""
 
+    @field:ElementList(name = "Language", required = false, entry = "Language", inline = true)
+    var language: List<String>? = null
+
     @field:Element(required = false, name = "AuthorGroup")
     var authorsGroup: AuthorGroup? = null
 
@@ -107,7 +110,6 @@ class BibliographySet {
 
     @field:Element(name = "TitleShort", required = false)
     var titleShort: String = ""
-
 
     @field:Element(name = "ISSN", required = false)
     var issn: String = ""

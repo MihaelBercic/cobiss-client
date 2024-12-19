@@ -3,9 +3,7 @@ package xml
 import database.tables.*
 import logging.Logger
 import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertIgnore
-import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
@@ -54,7 +52,7 @@ class BibliographyParser() {
                 val language = entry.language?.joinToString()
 
                 // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
-                val existingPaper = transaction { PaperEntity.find { PapersTable.doi eq doi }.firstOrNull() }
+                val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
                 val paperStatement: PaperEntity.() -> Unit = {
                     this.title = title
                     this.points = points
@@ -70,15 +68,15 @@ class BibliographyParser() {
                 val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
                 val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
                 val paper = transaction { existingPaper?.apply(paperStatement) ?: PaperEntity.new(paperStatement) }
+
+
                 orderedAuthors.forEach { (index, author) ->
                     transaction {
                         try {
-                            if (PapersResearcherTable.select { (PapersResearcherTable.paper eq paper.id) and (PapersResearcherTable.researcher eq author.id) }.empty()) {
-                                PapersResearcherTable.insertIgnore {
-                                    it[PapersResearcherTable.paper] = paper.id
-                                    it[researcher] = author.id
-                                    it[position] = index
-                                }
+                            PapersResearcherTable.insertIgnore {
+                                it[PapersResearcherTable.paper] = paper.id
+                                it[researcher] = author.id
+                                it[position] = index
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -97,16 +95,12 @@ class BibliographyParser() {
                     }
 
                     val authorEntity = transaction { existingEntity?.apply(authorStatement) ?: ForeignResearcherEntity.new(authorStatement) }
-
-
                     transaction {
                         try {
-                            if (ForeignPapersResearcherTable.select { (ForeignPapersResearcherTable.paper eq paper.id) and (ForeignPapersResearcherTable.researcher eq authorEntity.id) }.empty()) {
-                                ForeignPapersResearcherTable.insert {
-                                    it[ForeignPapersResearcherTable.paper] = paper.id
-                                    it[researcher] = authorEntity.id
-                                    it[position] = index
-                                }
+                            ForeignPapersResearcherTable.insertIgnore {
+                                it[ForeignPapersResearcherTable.paper] = paper.id
+                                it[researcher] = authorEntity.id
+                                it[position] = index
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()

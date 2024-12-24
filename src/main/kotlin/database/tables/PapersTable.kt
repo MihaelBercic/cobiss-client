@@ -23,6 +23,7 @@ object PapersTable : IntIdTable("papers") {
     val keywords = text("keywords").nullable()
     val url = varchar("url", 255).nullable()
     val language = varchar("language", 255).nullable()
+    val summary = text("summary").nullable()
 }
 
 class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
@@ -38,6 +39,7 @@ class PaperEntity(id: EntityID<Int>) : IntEntity(id) {
     var keywords by PapersTable.keywords
     var url by PapersTable.url
     var language by PapersTable.language
+    var summary by PapersTable.summary
 }
 
 object PapersResearcherTable : Table("papers_researchers") {

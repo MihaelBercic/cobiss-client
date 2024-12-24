@@ -5,10 +5,13 @@ import logging.Logger
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jsoup.Jsoup
 import org.simpleframework.xml.Serializer
 import org.simpleframework.xml.core.Persister
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URL
 import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -36,6 +39,12 @@ class BibliographyParser() {
         val total = division.entryList?.entries?.size ?: 0
         division.entryList?.entries?.forEachIndexed { index, entry ->
             time("[$number\t|\t$index \t/\t $total\t] Entry", false) {
+                val url = entry.url?.trim()
+                val summary = url?.let {
+                    val document = Jsoup.connect(url).get()
+                    document.select(".summary").firstOrNull()?.text()?.replace(" ... ", " ")
+                }
+
                 val title = entry.titleShort
                 val points = entry.evaluation?.points?.toDoubleOrNull() ?: 0.0
                 val authorNames = entry.authorsGroup?.authors ?: emptyList()
@@ -47,9 +56,12 @@ class BibliographyParser() {
                 val publishedLocation = entry.bibSet?.firstOrNull()
                 val publishedName = publishedLocation?.titleShort ?: ""
                 val publishedISSN = entry.issn?.firstOrNull() ?: ""
-                val keywords = entry.descriptors.orEmpty().plus(entry.topicalNames.orEmpty()).map(String::trim)
-                val url = entry.url?.trim().orEmpty()
                 val language = entry.language?.joinToString()
+                val keywords = entry.descriptors
+                    .filter { it.lang == language }
+                    .mapNotNull { it.content }
+                    .plus(entry.topicalNames.orEmpty()).map(String::trim)
+
 
                 // println("$title [$points] => AUTHORS=${authors.size}, PUB=$publicationYear, TYPE=$typology, DOI=$doi, PUBNAME=$publishedName, PUBISSN=$publishedISSN")
                 val existingPaper = transaction { PaperEntity.find { PapersTable.title eq title }.firstOrNull() }
@@ -64,6 +76,7 @@ class BibliographyParser() {
                     this.url = url
                     this.keywords = keywords.joinToString(",")
                     this.language = language
+                    this.summary = summary
                 }
                 val orderedAuthors = slovenianAuthors.mapIndexed { index, s -> index to s }.toMap()
                 val orderedForeignAuthors = foreignAuthors.mapIndexed { index, s -> index to s }.toMap()
@@ -284,5 +297,21 @@ class BibliographyParser() {
             existingBibliography?.apply(statement) ?: BibliographyUrl.new(statement)
         }
 
+    }
+}
+
+fun makeHttpGetRequest(url: String): String {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    return try {
+        connection.requestMethod = "GET"
+        connection.connect()
+
+        if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } else {
+            "Error: ${connection.responseCode} ${connection.responseMessage}"
+        }
+    } finally {
+        connection.disconnect()
     }
 }

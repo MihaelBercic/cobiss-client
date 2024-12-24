@@ -67,6 +67,7 @@ fun main(args: Array<String>) {
 //    bibliographyParser.parseBibliographies(listOf(53879))
 //    return
 
+
     if (transaction { ResearcherEntity.all().empty() }) {
         Logger.info("Fetching researchers to populate the database!")
         fetchResearchers(client)
@@ -158,7 +159,7 @@ fun fetchResearchers(client: CobissClient) {
         val subfield = researcher.subfield
         val type = researcher.type
         val mstid = researcher.mstid.toInt()
-
+        val field = researcher.field;
         threadPool.submit {
             transaction {
                 val researcherEntityStatement: ResearcherEntity.() -> Unit = {
@@ -170,6 +171,7 @@ fun fetchResearchers(client: CobissClient) {
                     this.subfield = subfield
                     this.type = type
                     this.sicrisID = researcher.id
+                    this.field = field
                 }
                 val existingResearcher = ResearcherEntity.findById(mstid)
                 existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(mstid, researcherEntityStatement)

@@ -90,7 +90,7 @@ class BibliographyEntry {
     var issn: List<String>? = null
 
     @field:ElementList(required = false, entry = "Descriptors", inline = true)
-    var descriptors: List<String>? = null
+    var descriptors: MutableList<Descriptor> = mutableListOf()
 
     @field:ElementList(required = false, entry = "TopicalName", inline = true)
     var topicalNames: List<String>? = null
@@ -114,6 +114,14 @@ class BibliographySet {
     @field:Element(name = "ISSN", required = false)
     var issn: String = ""
 }
+
+data class Descriptor(
+    @field:Attribute(name = "lang", required = false)
+    var lang: String? = null, // Language attribute
+
+    @field:Text
+    var content: String? = null // Descriptor content
+)
 
 @Root(name = "Typology", strict = false)
 data class Typology(

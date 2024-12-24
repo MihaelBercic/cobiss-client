@@ -3,9 +3,7 @@ package database.tables
 import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 
 /**
@@ -20,6 +18,7 @@ object ResearchersTable : IntIdTable("researchers") {
     val type = varchar("type", 100) // TODO: maybe change to enum later when I find out which types are possible
     val science = short("science")
     val subfield = varchar("subfield", 30)
+    val field = varchar("field", 80)
 }
 
 object ResearchersOrganisationTable : Table("researchers_organisation") {
@@ -38,6 +37,7 @@ class ResearcherEntity(id: EntityID<Int>) : IntEntity(id) {
     var type by ResearchersTable.type
     var science by ResearchersTable.science
     var subfield by ResearchersTable.subfield
+    var field by ResearchersTable.field
     var sicrisID by ResearchersTable.sicrisID
 
     val projects by ProjectEntity via ProjectsResearcherTable

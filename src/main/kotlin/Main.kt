@@ -1,6 +1,7 @@
 import cobiss.CobissClient
 import cobiss.Language
 import cobiss.builder.QueryLimit
+import cobiss.builder.project.Project
 import cobiss.builder.researcher.ResearcherDetails
 import database.tables.*
 import logging.Logger
@@ -23,10 +24,7 @@ fun main(args: Array<String>) {
     Logger.info("\tfetch = download BIB export.")
     Logger.info("\tprocess = process BIBs.")
     Database.connect(
-        "jdbc:postgresql://localhost:5432/postgres",
-        driver = "org.postgresql.Driver",
-        user = "postgres",
-        password = "cobiss"
+        "jdbc:postgresql://localhost:5432/postgres?connectTimeout=50", driver = "org.postgresql.Driver", user = "postgres", password = "cobiss"
     )
     try {
         transaction {
@@ -88,7 +86,7 @@ fun main(args: Array<String>) {
             parseBibliographies(researchers.map(ResearcherID::mstid))
         }
     }
-    if (modes.isEmpty()) {
+    if (modes.isEmpty() || modes.contains("process")) {
         val total = researchers.count()
         var current = 0
         researchers.forEach {
@@ -150,34 +148,38 @@ data class ResearcherID(val sicrisId: Int, val mstid: Int)
 fun fetchResearchers(client: CobissClient) {
     val researchers = client.researchers.newQuery().limit(QueryLimit.All).fetch()
     val threadPool = Executors.newFixedThreadPool(20)
-    researchers.forEach { researcher ->
-        val firstName = researcher.firstName
-        val lastName = researcher.lastName
-        val title = researcher.title
-        val science = researcher.science
-        val sex = researcher.sex
-        val subfield = researcher.subfield
-        val type = researcher.type
-        val mstid = researcher.mstid.toInt()
-        val field = researcher.field;
+    researchers.chunked(1000).forEach { researchers ->
         threadPool.submit {
             transaction {
-                val researcherEntityStatement: ResearcherEntity.() -> Unit = {
-                    this.firstName = firstName
-                    this.lastName = lastName
-                    this.title = title
-                    this.science = science.toShortOrNull() ?: -1
-                    this.sex = sex == "M"
-                    this.subfield = subfield
-                    this.type = type
-                    this.sicrisID = researcher.id
-                    this.field = field
+                researchers.forEach { researcher ->
+                    val firstName = researcher.firstName
+                    val lastName = researcher.lastName
+                    val title = researcher.title
+                    val science = researcher.science
+                    val sex = researcher.sex
+                    val subfield = researcher.subfield
+                    val type = researcher.type
+                    val mstid = researcher.mstid.toInt()
+                    val field = researcher.field;
+
+                    val researcherEntityStatement: ResearcherEntity.() -> Unit = {
+                        this.firstName = firstName
+                        this.lastName = lastName
+                        this.title = title
+                        this.science = science.toShortOrNull() ?: -1
+                        this.sex = sex == "M"
+                        this.subfield = subfield
+                        this.type = type
+                        this.sicrisID = researcher.id
+                        this.field = field
+                    }
+                    val existingResearcher = ResearcherEntity.findById(mstid)
+                    existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(mstid, researcherEntityStatement)
+
+//                Logger.info("Finished adding ${researcher.mstid} to researchers.")
                 }
-                val existingResearcher = ResearcherEntity.findById(mstid)
-                existingResearcher?.apply(researcherEntityStatement) ?: ResearcherEntity.new(mstid, researcherEntityStatement)
             }
         }
-        Logger.info("Finished adding ${researcher.mstid} to researchers.")
     }
     threadPool.shutdown()
     threadPool.awaitTermination(1, TimeUnit.HOURS)
@@ -225,7 +227,20 @@ fun fetchOrganisations(client: CobissClient) {
  * Store all projects in the database.
  */
 fun fetchProjects(client: CobissClient) {
-    val projects = client.projects.newQuery().limit(QueryLimit.All).fetch()
+    val projects = mutableListOf<Project>()
+    var offset = 0
+    val limit = 100
+    while (true) {
+        try {
+            val toAdd = client.projects.newQuery().limit(QueryLimit.Some(limit)).offset(offset).fetch()
+            projects.addAll(toAdd)
+            if (toAdd.size < limit) break
+        } catch (e: Exception) {
+            Logger.error(e)
+        }
+        offset += limit
+    }
+    Logger.debug("We have a total of ${projects.size} projects!")
 
     val threadPool = Executors.newFixedThreadPool(20)
     projects.toSet().forEach { project ->
@@ -270,10 +285,9 @@ fun fetchProjects(client: CobissClient) {
                 val leader = transaction {
                     ResearcherEntity.find {
                         concat(ResearchersTable.title, stringLiteral(" "), ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
+                    }.firstOrNull() ?: ResearcherEntity.find {
+                        concat(ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
                     }.firstOrNull()
-                        ?: ResearcherEntity.find {
-                            concat(ResearchersTable.firstName, stringLiteral(" "), ResearchersTable.lastName) eq details.resaercherFullName
-                        }.firstOrNull()
                 }
                 if (leader != null) {
                     transaction {

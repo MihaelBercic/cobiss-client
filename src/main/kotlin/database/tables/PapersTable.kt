@@ -21,8 +21,8 @@ object PapersTable : IntIdTable("papers") {
     val publishedISSN = varchar("publication_issn", 83)
     val points = double("points")
     val keywords = text("keywords").nullable()
-    val url = varchar("url", 255).nullable()
-    val language = varchar("language", 255).nullable()
+    val url = varchar("url", 500).nullable()
+    val language = varchar("language", 500).nullable()
     val summary = text("summary").nullable()
 }
 

@@ -1,9 +1,12 @@
 package cobiss
 
-import cobiss.builder.project.Projects
+import cobiss.builder.organisation.OrganisationAPI
+import cobiss.builder.project.ProjectsAPI
+import cobiss.builder.researcher.ResearchersAPI
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -14,10 +17,11 @@ import java.net.http.HttpResponse
  */
 class CobissClient(private val username: String, private val password: String, private val system: String, private val language: Language) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    val json = Json { ignoreUnknownKeys = true }
     private val url = "https://cris.cobiss.net/$system/${language.abbreviation}/service"
     private val httpClient = HttpClient.newHttpClient()
     private var token: String = fetchToken()
+    private var lastTokenAccess: Long = 0L
 
     @Serializable
     private data class JWTRequest(val username: String, val password: String)
@@ -35,10 +39,20 @@ class CobissClient(private val username: String, private val password: String, p
     }
 
     fun fetch(endpoint: String, requestBuilder: HttpRequest.Builder = HttpRequest.newBuilder()): HttpResponse<String> {
-        val finishedRequest = requestBuilder.uri(URI("$url/$endpoint")).header("Content-Type", "application/json").header("Authorization", token).build()
+        if (System.currentTimeMillis() - lastTokenAccess >= 20 * 60 * 60 * 1000) {
+            token = fetchToken()
+            lastTokenAccess = System.currentTimeMillis()
+        }
+        val finishedRequest = requestBuilder.uri(URI("$url/$endpoint").apply(Logger::info))
+            .header("Content-Type", "application/json")
+            .header("Authorization", token)
+            .build()
         return httpClient.send(finishedRequest, HttpResponse.BodyHandlers.ofString())
     }
 
-    val projects get() = Projects(this)
+    val projects get() = ProjectsAPI(this)
+    val researchers get() = ResearchersAPI(this)
+    val organisations get() = OrganisationAPI(this)
 
+    // 36213 kikiriki
 }

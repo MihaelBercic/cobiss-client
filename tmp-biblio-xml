@@ -1,0 +1,20 @@
+<html>
+	<head>
+	<link href="favicon.ico" rel="icon" type="image/x-icon" />
+	<meta http-equiv="refresh" content="5">
+
+	</head>
+	<style>
+	.image {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		margin: -8 0 0 -8;
+	}
+	</style>
+	<div class="image">
+	<img src="ajax-loader.gif" allign="middle"/>
+	</div>
+
+
+</html>

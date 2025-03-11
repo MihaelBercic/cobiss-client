@@ -31,7 +31,7 @@ object ProjectsTable : IntIdTable("projects_table") {
     val statadm = varchar("statadm", 500)
     val statdate = varchar("statdate", 500)
     val type = varchar("type", 500)
-    var projectSource = varchar("source", 100)
+    var projectSource = varchar("source", 100).nullable()
 }
 
 object ProjectsResearcherTable : Table("projects_researchers") {

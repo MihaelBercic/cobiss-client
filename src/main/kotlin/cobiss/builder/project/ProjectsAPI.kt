@@ -2,7 +2,6 @@ package cobiss.builder.project
 
 import cobiss.CobissAPI
 import cobiss.CobissClient
-import kotlinx.serialization.json.Json
 import java.net.URLEncoder
 import java.net.http.HttpRequest
 
@@ -18,7 +17,7 @@ class ProjectsAPI(override val cobissClient: CobissClient) : CobissAPI<ProjectDe
     override fun findById(id: String): ProjectDetails? {
         val request = HttpRequest.newBuilder().GET()
         val response = cobissClient.fetch("$endpoint/${URLEncoder.encode(id, "utf-8")}", request)
-        val body = response.body()
+        val body = response.body() //.apply(System.out::println)
         return try {
             cobissClient.json.decodeFromString(body)
         } catch (e: Exception) {

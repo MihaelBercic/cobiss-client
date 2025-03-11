@@ -3,9 +3,7 @@ package database.tables
 import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.javatime.date
 
@@ -33,6 +31,7 @@ object ProjectsTable : IntIdTable("projects_table") {
     val statadm = varchar("statadm", 500)
     val statdate = varchar("statdate", 500)
     val type = varchar("type", 500)
+    var projectSource = varchar("source", 100)
 }
 
 object ProjectsResearcherTable : Table("projects_researchers") {
@@ -76,6 +75,7 @@ class ProjectEntity(id: EntityID<Int>) : IntEntity(id) {
     var statadm by ProjectsTable.statadm
     var statdate by ProjectsTable.statdate
     var type by ProjectsTable.type
+    var projectSource by ProjectsTable.projectSource
 
     var organizations by OrganizationEntity via ProjectOrganizationsTable
     var researchers by ResearcherEntity via ProjectsResearcherTable

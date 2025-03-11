@@ -53,6 +53,9 @@ fun main(args: Array<String>) {
     val delay = args.getOrNull(2)?.toLongOrNull() ?: throw Exception("Missing delay...")
     val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
+
+    val project = client.projects.findById("8020")
+    return
     File("bibliographies").mkdir()
 
     Logger.debug("Running with modes: ${modes.joinToString()}")
@@ -107,7 +110,7 @@ private fun storeOrganisationsForResearcher(details: ResearcherDetails) {
     val researcher = transaction { ResearcherEntity.findById(id) } ?: throw Error("No researcher found in db.")
     val organisations = mutableListOf<OrganizationEntity>()
     Logger.info("\tEmployments...")
-    details.employs.forEach { employ ->
+    details.employs.distinctBy { it.orgCode }.forEach { employ ->
         val organisation = transaction { OrganizationEntity.findById(employ.orgCode.toInt()) }
         if (organisation != null) {
             Logger.info("\t${details.fullName} works at ${employ.orgName} for ${employ.rsrload}%");
@@ -275,6 +278,7 @@ fun fetchProjects(client: CobissClient) {
                     this.statadm = details.statadm
                     this.statdate = details.statdate
                     this.type = details.type
+                    this.projectSource = details.source
 
                     this.organizations = SizedCollection(details.organizations.mapNotNull { OrganizationEntity.findById(it.id) }.toSet())
                     this.researchers = SizedCollection(researchers.toSet())

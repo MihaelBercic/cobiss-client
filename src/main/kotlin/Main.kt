@@ -54,8 +54,6 @@ fun main(args: Array<String>) {
     val modes = args.drop(3)
     val client = CobissClient(username, password, "ecris", Language.Slovenian)
 
-    val project = client.projects.findById("8020")
-    return
     File("bibliographies").mkdir()
 
     Logger.debug("Running with modes: ${modes.joinToString()}")
@@ -69,18 +67,18 @@ fun main(args: Array<String>) {
 //    return
 
 
-    if (transaction { ResearcherEntity.all().empty() }) {
-        Logger.info("Fetching researchers to populate the database!")
-        fetchResearchers(client)
-    }
-    if (transaction { OrganizationEntity.all().empty() }) {
-        Logger.info("Fetching organisations to populate the database!")
-        fetchOrganisations(client)
-    }
-    if (transaction { ProjectEntity.all().empty() }) {
-        Logger.info("Fetching projects to populate the database!")
-        fetchProjects(client)
-    }
+//    if (transaction { ResearcherEntity.all().empty() }) {
+    Logger.info("Fetching researchers to populate the database!")
+    fetchResearchers(client)
+//    }
+//    if (transaction { OrganizationEntity.all().empty() }) {
+    Logger.info("Fetching organisations to populate the database!")
+    fetchOrganisations(client)
+//    }
+//    if (transaction { ProjectEntity.all().empty() }) {
+    Logger.info("Fetching projects to populate the database!")
+    fetchProjects(client)
+//    }
 
     val researchers = transaction { ResearcherEntity.all().map { ResearcherID(it.sicrisID, it.id.value) } }
     bibliographyParser.apply {
@@ -96,7 +94,6 @@ fun main(args: Array<String>) {
             Logger.info("${++current} / $total")
             val details = client.researchers.findById(it.sicrisId.toString()) ?: return@forEach
             val id = details.mstid.toInt()
-//            storeProjectsForResearcher(client, details)
             storeEducationForResearcher(details)
             storeOrganisationsForResearcher(details)
             Thread.sleep(DELAY)
